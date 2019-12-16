@@ -1,8 +1,8 @@
-
+import math
 
 def check_direction(board, position, row_direc, col_direc):
-    non_curr = board[position] * -1
-    row = position/8 + row_direc
+    non_curr = -board[position]
+    row = math.floor(position/8) + row_direc
     column = position%8 + col_direc
 
     if row<0 or row>7 or column<0 or column>7:
@@ -26,9 +26,9 @@ def check_direction(board, position, row_direc, col_direc):
 
 def check_position(board, position):
 
-    if check_direction(board, position, -1, 0):
+    if check_direction(board, position, 1, 0):
         return True
-    
+
     if check_direction(board, position, -1, 1):
         return True
 
@@ -38,7 +38,7 @@ def check_position(board, position):
     if check_direction(board, position, 1, 1):
         return True
 
-    if check_direction(board, position, 1, 0):
+    if check_direction(board, position, -1, 0):
         return True
 
     if check_direction(board, position, 1, -1):
@@ -55,7 +55,7 @@ def check_position(board, position):
 
 def change_direction(board, position, row_direc, col_direc):
     non_curr = board[position] * -1
-    row = position/8 + row_direc
+    row = math.floor(position/8) + row_direc
     column = position%8 + col_direc
     count = 0
 
@@ -108,12 +108,12 @@ def set_position(board, position, mark):
     return count
 
 
-def get_pos_position(board, current):
+def available_pos(board, current):
     possible_pos = []
 
     for i in range(64):
         if board[i] == 0:
-            board[i] == current
+            board[i] = current
             if check_position(board, i):
                 possible_pos.append(i)
             board[i] = 0
@@ -128,7 +128,7 @@ def index_to_char(index):
     elif index == 1:
         return 'O'
 
-def print(board):
+def print_board(board):
 
     print("\n\n        A      B      C      D      E      F      G      H\n")
     
