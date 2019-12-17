@@ -1,6 +1,7 @@
 
 from reversi import *
 import random
+import numpy as np
 import multiprocessing
 pool_num = multiprocessing.cpu_count()
 g_mark = None
@@ -9,7 +10,7 @@ def random_search(board):
     score = 0
     global g_mark
     for _ in range(1000):
-        temp_board = board.copy()
+        temp_board = np.copy(board)
 
         current_mark = -g_mark
         while True:
@@ -22,13 +23,13 @@ def random_search(board):
             if len(positions)==0:
                 break
             else:
-                position = random.choice(positions)
-                set_position(temp_board, position, current_mark)
+                row, column = random.choice(positions)
+                set_position(temp_board, row, column, current_mark)
                 current_mark = -current_mark 
 
     # check score
-        program_score = len(list(filter(lambda x: x==g_mark, temp_board)))
-        player_score = len(list(filter(lambda x: x==-g_mark, temp_board)))
+        program_score = np.count_nonzero(temp_board==g_mark)
+        player_score = np.count_nonzero(temp_board==-g_mark)
 
         if program_score > player_score:
             score += 1
@@ -46,9 +47,9 @@ def MCT_search(board, mark):
 
     temp_boards = []
 
-    for i in range(len(positions)):
-        temp_board = board.copy()
-        set_position(temp_board, positions[i], mark)
+    for row, column in positions:
+        temp_board = np.copy(board)
+        set_position(temp_board, row, column, mark)
         temp_boards.append(temp_board)
     
 
@@ -57,7 +58,7 @@ def MCT_search(board, mark):
 
 
     index = scores.index(max(scores))
-
-    set_position(board, positions[index], mark)
+    row, column = positions[index]
+    set_position(board, row, column, mark)
 
 

@@ -2,13 +2,14 @@
 import time
 from reversi import *
 from MCTS import MCT_search
+import numpy as np
 
-board = [0 for _ in range(64)]
+board = np.zeros([8,8])
 
-board[27] = 1
-board[36] = 1
-board[28] = -1
-board[35] = -1
+board[3][3] = 1
+board[4][4] = 1
+board[3][4] = -1
+board[4][3] = -1
 curr = 1
 
 while len(available_pos(board, curr)) != 0:
