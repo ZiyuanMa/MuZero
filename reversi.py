@@ -129,20 +129,19 @@ def index_to_char(index):
         return 'O'
 
 def print_board(board):
-
-    print("\n\n        A      B      C      D      E      F      G      H\n")
     
     char_board = list(map(lambda x: index_to_char(x), board))
     for i in range(8):
 
-        print("     ---------------------------------------------------------")
-        print("     |      |      |      |      |      |      |      |      |")
-
+        print("     -----------------------------------------------------------------")
+        print("     |       |       |       |       |       |       |       |       |")
+        
+        print("     ", end='')
         for j in range(8):
-            print("|  " + char_board[i*8+j], end=' ')
+            print("|   " + char_board[i*8+j], end='   ')
         
         print('|')
-        print("     |      |      |      |      |      |      |      |      |")
+        print("     |       |       |       |       |       |       |       |       |")
     
-    print("     ---------------------------------------------------------\n\n")
+    print("     -----------------------------------------------------------------\n\n")
 
