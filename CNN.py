@@ -1,5 +1,9 @@
+import random
 import torch
 import torch.nn as nn
+import numpy as np
+from reversi import *
+from MCTS import MCT_search
 
 class CNN(nn.Module):
     def __init__(self):
@@ -53,3 +57,31 @@ class model:
         self.network = CNN()
         self.loss = nn.MSELoss()
         self.opt = torch.optim.Adam(self.network.parameters())
+
+    def train(self):
+        self.network.eval()
+        for _ in range(100):
+            self.init_board()
+            while True:
+                positions = available_pos(self.board, self.curr)
+                if len(positions) == 0:
+                    self.curr = -self.curr
+                    positions = available_pos(self.board, self.curr)
+
+                if len(positions) == 0:
+                    break
+
+                scores = []
+                for row, column in positions:
+                    temp_board = np.copy(self.board)
+                    set_position(temp_board, row, column, self.curr)
+                    score = self.network(torch.from_numpy(temp_board))
+                    scores.append(score)
+
+    def init_board(self):
+        self.board = np.zeros([8,8])
+        self.board[3][3] = 1
+        self.board[4][4] = 1
+        self.board[3][4] = -1
+        self.board[4][3] = -1
+        self.curr = 1
