@@ -2,9 +2,27 @@ import random
 import math
 import torch
 import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from reversi import *
 from MCTS import MCT_search
+
+
+
+class DealDataset(Dataset):
+
+    def __init__(self, data):
+
+        self.x_data = [torch.from_numpy(board) for board, _ in data]
+        self.y_data = [torch.tensor([value]) for _, value in data]
+        self.len = len(self.x_data)
+    
+    def __getitem__(self, index):
+        return self.x_data[index], self.y_data[index]
+
+    def __len__(self):
+        return self.len
+
 
 class CNN(nn.Module):
     def __init__(self):
@@ -56,13 +74,13 @@ class CNN(nn.Module):
 
 class model:
     def __init__(self):
-        self.network = CNN()
-        self.network = self.network.double()
+        self.net = CNN()
+        self.net = self.net.double()
         self.loss = nn.MSELoss()
-        self.opt = torch.optim.Adam(self.network.parameters())
+        self.opt = torch.optim.Adam(self.net.parameters())
 
     def train(self):
-        self.network.eval()
+        self.net.eval()
 
         # value total_number predict_value
         board_dict = dict()
@@ -91,14 +109,15 @@ class model:
 
                     input = torch.from_numpy(temp_board).view(1,1,8,8)
                     #print(input)
-                    value = self.network(input).item() * self.curr
+                    with torch.no_grad():
+                        value = self.net(input).item() * self.curr
                     values.append(value)
 
-                sum_visit = math.sqrt(sum(visit_times)+1)
+                sum_visit = math.sqrt(sum(visit_times)+len(visit_times))
                 scores = [value * sum_visit / (visit+1) for value, visit in zip(values, visit_times)]
                 index = scores.index(max(scores))
                 set_position(self.board, positions[index][0], positions[index][1], self.curr)
-                round_boards[self.board.tobytes('F')] = values[index]
+                round_boards[self.board.tobytes()] = values[index]
                 self.curr = -self.curr
 
             white_score = np.count_nonzero(self.board==1)
@@ -114,6 +133,7 @@ class model:
             for board, value in round_boards.items():
 
                 if board in board_dict:
+
                     board_dict[board][0] += round_score
                     board_dict[board][1] += 1
                 else:
@@ -121,8 +141,27 @@ class model:
                     board_dict[board] = [round_score, 1, value]
 
         print(len(board_dict))
-        board_list = [(board, value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.5]
-        print(len(board_list))
+        for board, value in board_dict.items():
+            print(str(value[0])+' '+str(value[1]) + ' ' + str(value[2]))
+        board_list = [(np.frombuffer(board, dtype='double'), value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.5]
+        for a, b in board_list:
+            if b != 1.0 and b != -1.0:
+                print(b)
+        data_set = DealDataset(board_list)
+        data_loader = DataLoader(dataset=data_set,
+                          batch_size=128,
+                          shuffle=True)
+
+        for boards, values in data_loader:
+
+            self.opt.zero_grad()
+
+            outputs = self.net(boards)
+            loss = self.loss(outputs, values)
+            print(loss)
+            loss.backward()
+            self.opt.step()
+
 
     def init_board(self):
         self.board = np.zeros([8,8], dtype='double')
