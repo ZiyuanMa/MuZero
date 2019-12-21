@@ -8,16 +8,16 @@ from reversi import *
 from MCTS import MCT_search
 
 
-
 class DealDataset(Dataset):
 
     def __init__(self, data):
 
         self.x_data = [torch.from_numpy(board) for board, _ in data]
-        self.y_data = [torch.tensor([value]) for _, value in data]
+        self.y_data = [torch.tensor([value], dtype=torch.double) for _, value in data]
         self.len = len(self.x_data)
     
     def __getitem__(self, index):
+
         return self.x_data[index], self.y_data[index]
 
     def __len__(self):
@@ -78,13 +78,13 @@ class model:
         self.net = self.net.double()
         self.loss = nn.MSELoss()
         self.opt = torch.optim.Adam(self.net.parameters())
-
+        self.epch = 3
     def train(self):
         self.net.eval()
 
         # value total_number predict_value
         board_dict = dict()
-        for _ in range(100):
+        for _ in range(200):
             round_boards = dict()
             self.init_board()
             while True:
@@ -101,7 +101,7 @@ class model:
                 for row, column in positions:
                     temp_board = np.copy(self.board)
                     set_position(temp_board, row, column, self.curr)
-                    bytes_board = temp_board.tobytes('F')
+                    bytes_board = temp_board.tobytes()
                     if bytes_board not in board_dict:
                         visit_times.append(0)
                     else:
@@ -113,7 +113,7 @@ class model:
                         value = self.net(input).item() * self.curr
                     values.append(value)
 
-                sum_visit = math.sqrt(sum(visit_times)+len(visit_times))
+                sum_visit = math.sqrt(sum(visit_times))
                 scores = [value * sum_visit / (visit+1) for value, visit in zip(values, visit_times)]
                 index = scores.index(max(scores))
                 set_position(self.board, positions[index][0], positions[index][1], self.curr)
@@ -141,26 +141,29 @@ class model:
                     board_dict[board] = [round_score, 1, value]
 
         print(len(board_dict))
-        for board, value in board_dict.items():
-            print(str(value[0])+' '+str(value[1]) + ' ' + str(value[2]))
-        board_list = [(np.frombuffer(board, dtype='double'), value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.5]
-        for a, b in board_list:
-            if b != 1.0 and b != -1.0:
-                print(b)
+        # for board, value in board_dict.items():
+        #     print(str(value[0])+' '+str(value[1]) + ' ' + str(value[2]))
+        board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.5]
+        
+
         data_set = DealDataset(board_list)
         data_loader = DataLoader(dataset=data_set,
                           batch_size=128,
                           shuffle=True)
 
-        for boards, values in data_loader:
+        for _ in range(self.epch):
+            epch_loss = 0
+            for boards, values in data_loader:
 
-            self.opt.zero_grad()
+                self.opt.zero_grad()
 
-            outputs = self.net(boards)
-            loss = self.loss(outputs, values)
-            print(loss)
-            loss.backward()
-            self.opt.step()
+                outputs = self.net(boards)
+                loss = self.loss(outputs, values)
+                epch_loss += loss.item()
+                loss.backward()
+                self.opt.step()
+            epch_loss /= len(data_loader)
+            print(epch_loss)
 
 
     def init_board(self):
@@ -170,7 +173,6 @@ class model:
         self.board[3][4] = -1
         self.board[4][3] = -1
         self.curr = 1
-
 
 
 if __name__ == '__main__':
