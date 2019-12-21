@@ -4,8 +4,72 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
+import multiprocessing
+pool_num = round(multiprocessing.cpu_count()/4)
 from reversi import *
 from MCTS import MCT_search
+
+def self_play(board_dict, net):
+    board = np.zeros([8,8], dtype='double')
+    board[3][3] = 1
+    board[4][4] = 1
+    board[3][4] = -1
+    board[4][3] = -1
+    curr = 1
+    round_boards = list()
+    while True:
+        positions = available_pos(board, curr)
+        if len(positions) == 0:
+            curr = -curr
+            positions = available_pos(board, curr)
+
+        if len(positions) == 0:
+            break
+
+        values = []
+        visit_times = []
+        for row, column in positions:
+            temp_board = np.copy(board)
+            set_position(temp_board, row, column, curr)
+            bytes_board = temp_board.tobytes()
+            if bytes_board not in board_dict:
+                visit_times.append(0)
+            else:
+                visit_times.append(board_dict[bytes_board][1])
+
+            net_input = torch.from_numpy(temp_board).view(1,1,8,8)
+                    #print(input)
+            with torch.no_grad():
+                value = net(net_input).item() * curr
+            values.append(value)
+
+        sum_visit = math.sqrt(sum(visit_times))
+        scores = [value * sum_visit / (visit+1) for value, visit in zip(values, visit_times)]
+        index = scores.index(max(scores))
+        set_position(board, positions[index][0], positions[index][1], curr)
+
+        if board.tobytes() not in board_dict:
+            board_dict[board.tobytes()] = [0, 1, values[index]*curr]
+        else:
+            board_dict[board.tobytes()][1] += 1
+
+        round_boards.append(board.tobytes())
+        curr = -curr
+
+    white_score = np.count_nonzero(board==1)
+    black_score = np.count_nonzero(board==-1)
+
+    if white_score > black_score:
+        round_score = 1
+    elif white_score < black_score:
+        round_score = -1
+    else:
+        round_score = 0
+
+    for board in round_boards:
+
+        board_dict[board][0] += round_score
+
 
 
 class DealDataset(Dataset):
@@ -83,68 +147,77 @@ class model:
         self.net.eval()
 
         # value total_number predict_value
-        board_dict = dict()
-        for _ in range(200):
-            round_boards = dict()
-            self.init_board()
-            while True:
-                positions = available_pos(self.board, self.curr)
-                if len(positions) == 0:
-                    self.curr = -self.curr
-                    positions = available_pos(self.board, self.curr)
+        # board_dict = dict()
+        # for _ in range(200):
+        #     round_boards = dict()
+        #     self.init_board()
+        #     while True:
+        #         positions = available_pos(self.board, self.curr)
+        #         if len(positions) == 0:
+        #             self.curr = -self.curr
+        #             positions = available_pos(self.board, self.curr)
 
-                if len(positions) == 0:
-                    break
+        #         if len(positions) == 0:
+        #             break
 
-                values = []
-                visit_times = []
-                for row, column in positions:
-                    temp_board = np.copy(self.board)
-                    set_position(temp_board, row, column, self.curr)
-                    bytes_board = temp_board.tobytes()
-                    if bytes_board not in board_dict:
-                        visit_times.append(0)
-                    else:
-                        visit_times.append(board_dict[bytes_board][1])
+        #         values = []
+        #         visit_times = []
+        #         for row, column in positions:
+        #             temp_board = np.copy(self.board)
+        #             set_position(temp_board, row, column, self.curr)
+        #             bytes_board = temp_board.tobytes()
+        #             if bytes_board not in board_dict:
+        #                 visit_times.append(0)
+        #             else:
+        #                 visit_times.append(board_dict[bytes_board][1])
 
-                    input = torch.from_numpy(temp_board).view(1,1,8,8)
-                    #print(input)
-                    with torch.no_grad():
-                        value = self.net(input).item() * self.curr
-                    values.append(value)
+        #             input = torch.from_numpy(temp_board).view(1,1,8,8)
+        #             #print(input)
+        #             with torch.no_grad():
+        #                 value = self.net(input).item() * self.curr
+        #             values.append(value)
 
-                sum_visit = math.sqrt(sum(visit_times))
-                scores = [value * sum_visit / (visit+1) for value, visit in zip(values, visit_times)]
-                index = scores.index(max(scores))
-                set_position(self.board, positions[index][0], positions[index][1], self.curr)
-                round_boards[self.board.tobytes()] = values[index]
-                self.curr = -self.curr
+        #         sum_visit = math.sqrt(sum(visit_times))
+        #         scores = [value * sum_visit / (visit+1) for value, visit in zip(values, visit_times)]
+        #         index = scores.index(max(scores))
+        #         set_position(self.board, positions[index][0], positions[index][1], self.curr)
+        #         round_boards[self.board.tobytes()] = values[index]
+        #         self.curr = -self.curr
 
-            white_score = np.count_nonzero(self.board==1)
-            black_score = np.count_nonzero(self.board==-1)
+        #     white_score = np.count_nonzero(self.board==1)
+        #     black_score = np.count_nonzero(self.board==-1)
 
-            if white_score > black_score:
-                round_score = 1
-            elif white_score < black_score:
-                round_score = -1
-            else:
-                round_score = 0
+        #     if white_score > black_score:
+        #         round_score = 1
+        #     elif white_score < black_score:
+        #         round_score = -1
+        #     else:
+        #         round_score = 0
 
-            for board, value in round_boards.items():
+        #     for board, value in round_boards.items():
 
-                if board in board_dict:
+        #         if board in board_dict:
 
-                    board_dict[board][0] += round_score
-                    board_dict[board][1] += 1
-                else:
+        #             board_dict[board][0] += round_score
+        #             board_dict[board][1] += 1
+        #         else:
 
-                    board_dict[board] = [round_score, 1, value]
+        #             board_dict[board] = [round_score, 1, value]
+        print(pool_num)
+        p = multiprocessing.Pool(pool_num)
+        board_dict = multiprocessing.Manager().dict()
+
+        for _ in range(1000):
+            p.apply_async(self_play, args=(board_dict,self.net))
+
+        p.close()
+        p.join()
 
         print(len(board_dict))
         # for board, value in board_dict.items():
         #     print(str(value[0])+' '+str(value[1]) + ' ' + str(value[2]))
-        board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.5]
-        
+        board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.1]
+        print(len(board_list))
 
         data_set = DealDataset(board_list)
         data_loader = DataLoader(dataset=data_set,
