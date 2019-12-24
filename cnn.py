@@ -95,28 +95,41 @@ class CNN(nn.Module):
         # 8x8 input 6x6 output
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels=1,
-                            out_channels=8,
+                            out_channels=16,
                             kernel_size=3,
                             stride=1,
                             padding=0),
-            nn.BatchNorm2d(8),
+            nn.BatchNorm2d(16),
             nn.LeakyReLU()
         )
 
         # 6x6 input 4x4 output
         self.conv2 = nn.Sequential(
-            nn.Conv2d(8,32,3,1,0),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(16, 64, 3, 1, 0),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU()
         )
 
         # 4x4 input 1x1 output
         self.conv3 = nn.Sequential(
-            nn.Conv2d(32,128,3,1,0),
+            nn.Conv2d(64, 128, 3, 1, 0),
             nn.MaxPool2d(2),
             nn.BatchNorm2d(128),
             nn.LeakyReLU()
         )
+
+        # # 8x8 input 2x2 output
+        # self.conv4 = nn.Sequential(
+        #     nn.Conv2d(1, 32, 5, 3, 0)
+        #     nn.BatchNorm2d(16),
+        #     nn.LeakyReLU()
+        # )
+
+        # self.conv5 = nn.Sequential(
+        #     nn.Conv2d(32, 64, 2, 1, 0)
+        #     nn.BatchNorm2d(64),
+        #     nn.LeakyReLU()
+        # )
 
         # fully-connected layer
         self.FC = nn.Sequential(
@@ -127,13 +140,18 @@ class CNN(nn.Module):
 
     def forward(self, x):
 
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.conv3(x)
+        x1_out = self.conv1(x)
+        x1_out = self.conv2(x1_out)
+        x1_out = self.conv3(x1_out)
 
-        x = self.FC(x.view(x.size(0),-1))
+        # x2_out = self.conv4(x)
+        # x2_out = self.conv5(x2_out)
 
-        return x
+
+
+        out = self.FC(x1_out.view(x1_out.size(0),-1))
+
+        return out
 
 
 class model:
@@ -150,7 +168,7 @@ class model:
         p = multiprocessing.Pool(pool_num)
         board_dict = multiprocessing.Manager().dict()
 
-        for _ in range(1000):
+        for _ in range(10000):
             p.apply_async(self_play, args=(board_dict,self.net))
 
         p.close()
@@ -182,14 +200,57 @@ class model:
             epch_loss /= len(data_loader)
             print(epch_loss)
 
-        
-    def init_board(self):
-        self.board = np.zeros([8,8], dtype='double')
-        self.board[3][3] = 1
-        self.board[4][4] = 1
-        self.board[3][4] = -1
-        self.board[4][3] = -1
-        self.curr = 1
+        self.test()
+    def test(self):
+        score = 0
+        self.net.eval()
+        for _ in range(10):
+            board = np.zeros([8,8], dtype='double')
+            board[3][3] = 1
+            board[4][4] = 1
+            board[3][4] = -1
+            board[4][3] = -1
+            curr = 1
+            while True:
+                positions = available_pos(board, curr)
+                if len(positions) == 0:
+                    curr = -curr
+                    positions = available_pos(board, curr)
+
+                if len(positions) == 0:
+                    break
+
+                if curr == 1:
+                    values = []
+
+                    for row, column in positions:
+                        temp_board = np.copy(board)
+                        set_position(temp_board, row, column, curr)
+                        net_input = torch.from_numpy(temp_board).view(1,1,8,8)
+                    #print(input)
+                        with torch.no_grad():
+                            value = self.net(net_input).item() * curr
+                        values.append(value)
+
+                    index = values.index(max(values))
+                    set_position(board, positions[index][0], positions[index][1], curr)
+                else:
+                    MCT_search(board, curr)
+
+                curr = -curr
+
+            white_score = np.count_nonzero(board==1)
+            black_score = np.count_nonzero(board==-1)
+
+            if white_score > black_score:
+                round_score = 1
+            elif white_score < black_score:
+                round_score = -1
+            else:
+                round_score = 0
+            score += round_score
+        print(score)
+
 
 
 if __name__ == '__main__':
