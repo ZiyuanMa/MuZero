@@ -6,7 +6,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import multiprocessing
 pool_num = round(multiprocessing.cpu_count()/4)
-from reversi import *
+from reversi import available_pos, set_position
 from MCTS import MCT_search
 
 def self_play(board_dict, net):
@@ -162,45 +162,45 @@ class model:
         self.opt = torch.optim.Adam(self.net.parameters())
         self.epch = 3
     def train(self):
-        self.net.eval()
+        for _ in range(10):
+            self.net.eval()
+            p = multiprocessing.Pool(pool_num)
+            board_dict = multiprocessing.Manager().dict()
 
+            for _ in range(10000):
+                p.apply_async(self_play, args=(board_dict,self.net))
 
-        p = multiprocessing.Pool(pool_num)
-        board_dict = multiprocessing.Manager().dict()
+            p.close()
+            p.join()
 
-        for _ in range(10000):
-            p.apply_async(self_play, args=(board_dict,self.net))
+            print(len(board_dict))
+            # for board, value in board_dict.items():
+            #     print(str(value[0])+' '+str(value[1]) + ' ' + str(value[2]))
+            board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.05]
+            print(len(board_list))
 
-        p.close()
-        p.join()
+            data_set = DealDataset(board_list)
+            data_loader = DataLoader(dataset=data_set,
+                            batch_size=128,
+                            shuffle=True)
 
-        print(len(board_dict))
-        # for board, value in board_dict.items():
-        #     print(str(value[0])+' '+str(value[1]) + ' ' + str(value[2]))
-        board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.05]
-        print(len(board_list))
+            self.net.train()
+            for _ in range(self.epch):
+                epch_loss = 0
+                for boards, values in data_loader:
 
-        data_set = DealDataset(board_list)
-        data_loader = DataLoader(dataset=data_set,
-                          batch_size=128,
-                          shuffle=True)
+                    self.opt.zero_grad()
 
-        self.net.train()
-        for _ in range(self.epch):
-            epch_loss = 0
-            for boards, values in data_loader:
+                    outputs = self.net(boards)
+                    loss = self.loss(outputs, values)
+                    epch_loss += loss.item()
+                    loss.backward()
+                    self.opt.step()
+                epch_loss /= len(data_loader)
+                print('loss: %.6f' %epch_loss)
 
-                self.opt.zero_grad()
-
-                outputs = self.net(boards)
-                loss = self.loss(outputs, values)
-                epch_loss += loss.item()
-                loss.backward()
-                self.opt.step()
-            epch_loss /= len(data_loader)
-            print(epch_loss)
-
-        self.test()
+            self.test()
+            torch.save(self.net.state_dict(), './model.pth')
     def test(self):
         score = 0
         self.net.eval()
@@ -249,7 +249,7 @@ class model:
             else:
                 round_score = 0
             score += round_score
-        print(score)
+        print('test score: %d' %score)
 
 
 
