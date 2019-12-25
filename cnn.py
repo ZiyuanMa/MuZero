@@ -215,19 +215,21 @@ class model:
             self.net.share_memory()
             board_dict = mp.Manager().dict()
 
-            with mp.Pool(3) as p:
-                with torch.no_grad():
-                    for _ in range(100):
-                        p.apply_async(self_play, args=(board_dict,self.net,))
+            with mp.Pool(3) as p, torch.no_grad():
+
+                for _ in range(100):
+                    p.apply_async(self_play, args=(board_dict,self.net,))
+
                 p.close()
                 p.join()
-            # self.p.close()
-            # self.p.join()
+
 
             print(len(board_dict))
             # for board, value in board_dict.items():
             #     print(str(value[0])+' '+str(value[1]) + ' ' + str(value[2]))
-            board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.01]
+            board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) 
+                                                                for board, value in board_dict.items() 
+                                                                    if abs(value[2]-value[0]/value[1]) > 0.01]
             print(len(board_list))
 
             data_set = DealDataset(board_list)
@@ -250,37 +252,24 @@ class model:
                 epch_loss /= len(data_loader)
                 print('loss: %.6f' %epch_loss)
 
-            self.net.eval()
-            self.net.share_memory()
+            self.test()
 
-            scores = []
-            with mp.Pool(10) as p:
-                with torch.no_grad():
-                    for _ in range(10):
-                        re = p.apply_async(against_MCTS, args=(self.net,))
-                        score = re
-                        scores.append(score)
-                p.close()
-                p.join()
-
-            print('test score: %d' %sum(scores))
             torch.save(self.net.state_dict(), './model.pth')
 
-    def test(self,p):
+    def test(self):
         self.net.eval()
         self.net.share_memory()
 
-        #p = mp.Pool(pool_num)
-
         scores = []
-        with torch.no_grad():
+        with mp.Pool(10) as p, torch.no_grad():
+            
             for _ in range(10):
                 re = p.apply(against_MCTS, args=(self.net,))
-                score = re.get()
+                score = re
                 scores.append(score)
 
-        # p.close()
-        # p.join()
+            p.close()
+            p.join()
 
         print('test score: %d' %sum(scores))
 
