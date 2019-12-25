@@ -248,52 +248,6 @@ class model:
             self.test()
             torch.save(self.net.state_dict(), './model.pth')
 
-    def against_MCTS(self):
-        board = np.zeros([8,8], dtype='double')
-        board[3][3] = 1
-        board[4][4] = 1
-        board[3][4] = -1
-        board[4][3] = -1
-        curr = 1
-        self_mark = choice([1, -1])
-        while True:
-            positions = available_pos(board, curr)
-            if len(positions) == 0:
-                curr = -curr
-                positions = available_pos(board, curr)
-
-            if len(positions) == 0:
-                break
-
-            if curr == self_mark:
-                values = []
-
-                for row, column in positions:
-                    temp_board = np.copy(board)
-                    set_position(temp_board, row, column, curr)
-                    net_input = torch.from_numpy(temp_board).view(1,1,8,8)
-
-                    with torch.no_grad():
-                        value = self.net(net_input).item() * curr
-                    values.append(value)
-
-                index = values.index(max(values))
-                set_position(board, positions[index][0], positions[index][1], curr)
-            else:
-                MCT_search(board, curr)
-
-            curr = -curr
-
-        white_score = np.count_nonzero(board==1)
-        black_score = np.count_nonzero(board==-1)
-
-        if white_score > black_score:
-            return self_mark
-        elif white_score < black_score:
-            return -self_mark
-        else:
-            return 0
-
     def test(self):
         self.net.eval()
         self.net.share_memory()
