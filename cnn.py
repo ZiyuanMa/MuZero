@@ -295,23 +295,21 @@ class model:
             return 0
 
     def test(self):
-        score = 0
         self.net.eval()
         self.net.share_memory()
 
         p = mp.Pool(pool_num)
-        board_dict = mp.Manager().dict()
 
-        results = []
+        scores = []
         with torch.no_grad():
             for _ in range(10):
                 re = p.apply_async(against_MCTS, args=(self.net))
-                results.append(re.get())
+                scores.append(re.get())
 
         p.close()
         p.join()
 
-        print('test score: %d' %sum(results))
+        print('test score: %d' %sum(scores))
 
 
 
