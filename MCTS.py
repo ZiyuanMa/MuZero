@@ -1,9 +1,8 @@
 
-from reversi import *
+from reversi import available_pos, set_position
 import random
 import numpy as np
 import multiprocessing as mp
-pool_num = 4
 
 
 def self_play(board, mark):
@@ -20,10 +19,10 @@ def self_play(board, mark):
             
         if len(positions)==0:
             break
-        else:
-            row, column = random.choice(positions)
-            set_position(temp_board, row, column, current_mark)
-            current_mark = -current_mark 
+        
+        row, column = random.choice(positions)
+        set_position(temp_board, row, column, current_mark)
+        current_mark = -current_mark 
 
     # check score
     program_score = np.count_nonzero(temp_board==mark)
@@ -41,7 +40,7 @@ def MCT_search(board, mark):
 
     positions = available_pos(board, mark)
 
-    p = mp.Pool(pool_num)
+    p = mp.Pool(4)
     scores = []
 
     for row, column in positions:
@@ -50,9 +49,12 @@ def MCT_search(board, mark):
         results = []
 
         for _ in range(500):
-            results.append(p.apply_async(self_play, args=(temp_board,mark)))
+            re = p.apply_async(self_play, args=(temp_board,mark))
+            results.append(re.get())
 
-        results = map(lambda x: x.get(), results)
+        p.close()
+        p.join()
+
         scores.append(sum(results))
 
 
