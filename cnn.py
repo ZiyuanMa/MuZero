@@ -1,11 +1,11 @@
 from random import choice
-import math
+from math import sqrt
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import torch.multiprocessing as mp
-pool_num = round(mp.cpu_count()/2)
+pool_num = round(mp.cpu_count()/4)
 from reversi import available_pos, set_position
 from MCTS import MCT_search
 
@@ -45,7 +45,7 @@ def self_play(board_dict, net):
             value = value.item() * curr
             values.append(value)
 
-        sum_visit = math.sqrt(sum(visit_times))
+        sum_visit = sqrt(sum(visit_times))
         scores = [value * sum_visit / (visit+1) for value, visit in zip(values, visit_times)]
         index = scores.index(max(scores))
         set_position(board, positions[index][0], positions[index][1], curr)
@@ -123,7 +123,7 @@ class DealDataset(Dataset):
 
         self.x_data = [torch.from_numpy(board) for board, _ in data]
         self.y_data = [torch.tensor([value], dtype=torch.double) for _, value in data]
-        self.len = len(self.x_data)
+        self.len = len(data)
     
     def __getitem__(self, index):
 
@@ -205,17 +205,17 @@ class model:
         self.net = self.net.double()
         self.loss = nn.MSELoss()
         self.opt = torch.optim.Adam(self.net.parameters())
-        self.epch = 3
-        mp.set_start_method('spawn')
+        self.epch = 4
+        mp.set_start_method('forkserver')
 
     def train(self):
-        #mp.set_start_method('forkserver')
+
         for _ in range(10):
             self.net.eval()
             self.net.share_memory()
             board_dict = mp.Manager().dict()
 
-            with mp.Pool(3) as p, torch.no_grad():
+            with mp.Pool(pool_num) as p, torch.no_grad():
 
                 for _ in range(100):
                     p.apply_async(self_play, args=(board_dict,self.net,))
@@ -225,8 +225,7 @@ class model:
 
 
             print(len(board_dict))
-            # for board, value in board_dict.items():
-            #     print(str(value[0])+' '+str(value[1]) + ' ' + str(value[2]))
+
             board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) 
                                                                 for board, value in board_dict.items() 
                                                                     if abs(value[2]-value[0]/value[1]) > 0.01]
@@ -254,7 +253,7 @@ class model:
 
             self.test()
 
-            torch.save(self.net.state_dict(), './model.pth')
+            torch.save(self.net.state_dict(), './model1.pth')
 
     def test(self):
         self.net.eval()
@@ -264,7 +263,7 @@ class model:
         with mp.Pool(10) as p, torch.no_grad():
             
             for _ in range(10):
-                re = p.apply(against_MCTS, args=(self.net,))
+                re = p.apply_async(against_MCTS, args=(self.net,))
                 score = re
                 scores.append(score)
 
