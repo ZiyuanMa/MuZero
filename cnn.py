@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import torch.multiprocessing as mp
-pool_num = round(mp.cpu_count()/4)
+pool_num = round(mp.cpu_count()/2)
 from reversi import available_pos, set_position
 from MCTS import MCT_search
 
@@ -206,26 +206,28 @@ class model:
         self.loss = nn.MSELoss()
         self.opt = torch.optim.Adam(self.net.parameters())
         self.epch = 3
-    def train(self):
         mp.set_start_method('spawn')
+
+    def train(self):
+        #mp.set_start_method('forkserver')
         for _ in range(10):
             self.net.eval()
             self.net.share_memory()
-
-            p = mp.Pool(pool_num)
             board_dict = mp.Manager().dict()
 
-            with torch.no_grad():
-                for _ in range(100):
-                    p.apply_async(self_play, args=(board_dict,self.net))
-
-            p.close()
-            p.join()
+            with mp.Pool(3) as p:
+                with torch.no_grad():
+                    for _ in range(100):
+                        p.apply_async(self_play, args=(board_dict,self.net,))
+                p.close()
+                p.join()
+            # self.p.close()
+            # self.p.join()
 
             print(len(board_dict))
             # for board, value in board_dict.items():
             #     print(str(value[0])+' '+str(value[1]) + ' ' + str(value[2]))
-            board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.05]
+            board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) for board, value in board_dict.items() if abs(value[2]-value[0]/value[1]) > 0.01]
             print(len(board_list))
 
             data_set = DealDataset(board_list)
@@ -248,23 +250,37 @@ class model:
                 epch_loss /= len(data_loader)
                 print('loss: %.6f' %epch_loss)
 
-            self.test()
+            self.net.eval()
+            self.net.share_memory()
+
+            scores = []
+            with mp.Pool(10) as p:
+                with torch.no_grad():
+                    for _ in range(10):
+                        re = p.apply_async(against_MCTS, args=(self.net,))
+                        score = re
+                        scores.append(score)
+                p.close()
+                p.join()
+
+            print('test score: %d' %sum(scores))
             torch.save(self.net.state_dict(), './model.pth')
 
-    def test(self):
+    def test(self,p):
         self.net.eval()
         self.net.share_memory()
 
-        p = mp.Pool(pool_num)
+        #p = mp.Pool(pool_num)
 
         scores = []
         with torch.no_grad():
             for _ in range(10):
-                re = p.apply_async(against_MCTS, args=(self.net))
-                scores.append(re.get())
+                re = p.apply(against_MCTS, args=(self.net,))
+                score = re.get()
+                scores.append(score)
 
-        p.close()
-        p.join()
+        # p.close()
+        # p.join()
 
         print('test score: %d' %sum(scores))
 

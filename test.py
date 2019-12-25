@@ -1,15 +1,23 @@
 import multiprocessing
+import time
 
 def f(i,l):
-    if i%4 not in l:
-        l.append(i%4)
+    #time.sleep(2)
+    l.append(i)
 
-p = multiprocessing.Pool(4)
-l = multiprocessing.Manager().list()
+#p = multiprocessing.Pool(4)
+if __name__ == '__main__':
+    multiprocessing.set_start_method('forkserver')
+    l = multiprocessing.Manager().list()
+    a = []
+    for _ in range(4):
+        with multiprocessing.Pool(4) as p:
 
-for i in range(20):
-    p.apply_async(f, args=(i,l))
-p.close()
-p.join()
+            for i in range(40):
+                p.apply_async(f, args=(i,l))
+            p.close()
+            p.join()
+        print(len(l))
 
-print(l)
+    print(a)
+    print(l)
