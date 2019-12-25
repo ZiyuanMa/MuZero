@@ -2,8 +2,8 @@
 from reversi import *
 import random
 import numpy as np
-import multiprocessing
-pool_num = multiprocessing.cpu_count()
+import multiprocessing as mp
+pool_num = 4
 
 
 def self_play(board, mark):
@@ -41,7 +41,7 @@ def MCT_search(board, mark):
 
     positions = available_pos(board, mark)
 
-    p = multiprocessing.Pool(pool_num)
+    p = mp.Pool(pool_num)
     scores = []
 
     for row, column in positions:

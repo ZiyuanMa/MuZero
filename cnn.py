@@ -229,7 +229,7 @@ class model:
                         temp_board = np.copy(board)
                         set_position(temp_board, row, column, curr)
                         net_input = torch.from_numpy(temp_board).view(1,1,8,8)
-                    #print(input)
+
                         with torch.no_grad():
                             value = self.net(net_input).item() * curr
                         values.append(value)
