@@ -94,8 +94,7 @@ def against_MCTS(net):
                 set_position(temp_board, row, column, curr)
                 net_input = torch.from_numpy(temp_board).view(1,1,8,8)
 
-                with torch.no_grad():
-                    value = net(net_input).item() * curr
+                value = net(net_input).item() * curr
                 values.append(value)
 
             index = values.index(max(values))
