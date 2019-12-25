@@ -24,7 +24,7 @@ def check_direction(board, row, column, row_direc, col_direc):
     
     return False
 
-
+# check if this position is avaliable
 def check_position(board, row, column):
 
     if check_direction(board, row, column, 1, 0):

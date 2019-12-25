@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-import multiprocessing
-pool_num = round(multiprocessing.cpu_count()/4)
+import torch.multiprocessing as mp
+pool_num = round(mp.cpu_count()/4)
 from reversi import available_pos, set_position
 from MCTS import MCT_search
 
@@ -38,9 +38,8 @@ def self_play(board_dict, net):
                 visit_times.append(board_dict[bytes_board][1])
 
             net_input = torch.from_numpy(temp_board).view(1,1,8,8)
-                    #print(input)
-            with torch.no_grad():
-                value = net(net_input).item() * curr
+            
+            value = net(net_input).item() * curr
             values.append(value)
 
         sum_visit = math.sqrt(sum(visit_times))
@@ -164,11 +163,14 @@ class model:
     def train(self):
         for _ in range(10):
             self.net.eval()
-            p = multiprocessing.Pool(pool_num)
-            board_dict = multiprocessing.Manager().dict()
+            self.net.share_memory()
 
-            for _ in range(10000):
-                p.apply_async(self_play, args=(board_dict,self.net))
+            p = mp.Pool(pool_num)
+            board_dict = mp.Manager().dict()
+
+            with torch.no_grad():
+                for _ in range(10000):
+                    p.apply_async(self_play, args=(board_dict,self.net))
 
             p.close()
             p.join()
