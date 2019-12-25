@@ -39,7 +39,10 @@ def self_play(board_dict, net):
 
             net_input = torch.from_numpy(temp_board).view(1,1,8,8)
             
-            value = net(net_input).item() * curr
+            #value = net(net_input).item() * curr
+
+            value = net(net_input)
+            value = value.item() * curr
             values.append(value)
 
         sum_visit = math.sqrt(sum(visit_times))
@@ -204,6 +207,7 @@ class model:
         self.opt = torch.optim.Adam(self.net.parameters())
         self.epch = 3
     def train(self):
+        mp.set_start_method('spawn')
         for _ in range(10):
             self.net.eval()
             self.net.share_memory()
@@ -212,7 +216,7 @@ class model:
             board_dict = mp.Manager().dict()
 
             with torch.no_grad():
-                for _ in range(10000):
+                for _ in range(100):
                     p.apply_async(self_play, args=(board_dict,self.net))
 
             p.close()
