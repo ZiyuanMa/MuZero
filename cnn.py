@@ -1,14 +1,17 @@
-from random import choice
+import random
 from math import sqrt
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
 import numpy as np
 import torch.multiprocessing as mp
 pool_num = round(mp.cpu_count()/4)
 from reversi import available_pos, set_position
 from MCTS import MCT_search
+torch.manual_seed(1261)
+random.seed(1261)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 def self_play(board_dict, net):
     board = np.zeros([8,8], dtype='double')
@@ -73,14 +76,14 @@ def self_play(board_dict, net):
 
         board_dict[board][0] += round_score
 
-def against_MCTS(net):
+def against_MCTS(scores, net):
     board = np.zeros([8,8], dtype='double')
     board[3][3] = 1
     board[4][4] = 1
     board[3][4] = -1
     board[4][3] = -1
     curr = 1
-    self_mark = choice([1, -1])
+    self_mark = random.choice([1, -1])
     while True:
         positions = available_pos(board, curr)
         if len(positions) == 0:
@@ -112,11 +115,11 @@ def against_MCTS(net):
     black_score = np.count_nonzero(board==-1)
 
     if white_score > black_score:
-        return self_mark
+        scores.append(self_mark)
     elif white_score < black_score:
-        return -self_mark
+        scores.append(-self_mark)
     else:
-        return 0
+        scores.append(0)
 
 class DealDataset(Dataset):
 
@@ -135,7 +138,7 @@ class DealDataset(Dataset):
         return self.len
 
     def transform(self, narray):
-        if choice([True, False]):
+        if random.choice([True, False]):
             
             return torch.from_numpy(np.rot90(narray, 2).copy()).view(1,8,8)
         else:
@@ -242,7 +245,7 @@ class model:
             data_set = DealDataset(board_list)
             data_loader = DataLoader(dataset=data_set,
                             batch_size=256,
-                            shuffle=True, num_workers = 4)
+                            shuffle=True)
 
             self.net.train()
             for _ in range(self.epch):
@@ -259,7 +262,22 @@ class model:
                 epch_loss /= len(data_loader)
                 print('loss: %.6f' %epch_loss)
 
-            self.test()
+            #self.test()
+            self.net.eval()
+            self.net.share_memory()
+
+            scores = mp.Manager().list()
+            with mp.Pool(10) as p, torch.no_grad():
+                
+                for _ in range(10):
+                    p.apply_async(against_MCTS, args=(scores, self.net,))
+                    # score = p.apply_async(against_MCTS, args=(self.net,)).get()
+                    # scores.append(score)
+
+                p.close()
+                p.join()
+
+            print('test score: %d' %sum(scores))
 
             torch.save(self.net.state_dict(), './model1.pth')
 
@@ -271,8 +289,7 @@ class model:
         with mp.Pool(10) as p, torch.no_grad():
             
             for _ in range(10):
-                re = p.apply_async(against_MCTS, args=(self.net,))
-                score = re
+                score = p.apply_async(against_MCTS, args=(self.net,)).get()
                 scores.append(score)
 
             p.close()
