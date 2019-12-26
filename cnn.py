@@ -3,6 +3,7 @@ from math import sqrt
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 import numpy as np
 import torch.multiprocessing as mp
 pool_num = round(mp.cpu_count()/4)
@@ -121,17 +122,24 @@ class DealDataset(Dataset):
 
     def __init__(self, data):
 
-        self.x_data = [torch.from_numpy(board) for board, _ in data]
+        self.x_data = [board for board, _ in data]
         self.y_data = [torch.tensor([value], dtype=torch.double) for _, value in data]
         self.len = len(data)
-    
+
     def __getitem__(self, index):
 
-        return self.x_data[index], self.y_data[index]
+        return self.transform(self.x_data[index]), self.y_data[index]
+
 
     def __len__(self):
         return self.len
 
+    def transform(self, narray):
+        if choice([True, False]):
+            
+            return torch.from_numpy(np.rot90(narray, 2).copy()).view(1,8,8)
+        else:
+            return torch.from_numpy(narray).view(1,8,8)
 
 class CNN(nn.Module):
     def __init__(self):
@@ -226,7 +234,7 @@ class model:
 
             print(len(board_dict))
 
-            board_list = [(np.frombuffer(board, dtype='double').reshape(1,8,8), value[0]/value[1]) 
+            board_list = [(np.frombuffer(board, dtype='double').reshape(8,8), value[0]/value[1]) 
                                                                 for board, value in board_dict.items() 
                                                                     if abs(value[2]-value[0]/value[1]) > 0.01]
             print(len(board_list))
