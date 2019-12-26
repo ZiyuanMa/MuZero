@@ -225,7 +225,7 @@ class model:
 
             with mp.Pool(pool_num) as p, torch.no_grad():
 
-                for _ in range(100):
+                for _ in range(10000):
                     p.apply_async(self_play, args=(board_dict,self.net,))
 
                 p.close()
@@ -241,8 +241,8 @@ class model:
 
             data_set = DealDataset(board_list)
             data_loader = DataLoader(dataset=data_set,
-                            batch_size=128,
-                            shuffle=True)
+                            batch_size=256,
+                            shuffle=True, num_workers = 4)
 
             self.net.train()
             for _ in range(self.epch):
