@@ -49,15 +49,19 @@ def self_play(board_dict, net):
             value = value.item() * curr
             values.append(value)
 
-        sum_visit = sqrt(sum(visit_times))
-        scores = [value * sum_visit / (visit+1) for value, visit in zip(values, visit_times)]
+        # sum_visit = sqrt(sum(visit_times))
+        scores = [value / sqrt(visit+1) for value, visit in zip(values, visit_times)]
         index = scores.index(max(scores))
         set_position(board, positions[index][0], positions[index][1], curr)
 
         if board.tobytes() not in board_dict:
             board_dict[board.tobytes()] = [0, 1, values[index]*curr]
         else:
-            board_dict[board.tobytes()][1] += 1
+
+            l = board_dict[board.tobytes()]
+            l[1] += 1
+            board_dict[board.tobytes()] = l
+
 
         round_boards.append(board.tobytes())
         curr = -curr
@@ -66,15 +70,18 @@ def self_play(board_dict, net):
     black_score = np.count_nonzero(board==-1)
 
     if white_score > black_score:
-        round_score = 1
+
+        for board in round_boards:
+            l = board_dict[board]
+            l[0] += 1
+            board_dict[board] = l
     elif white_score < black_score:
-        round_score = -1
-    else:
-        round_score = 0
 
-    for board in round_boards:
+        for board in round_boards:
+            l = board_dict[board]
+            l[0] -= 1
+            board_dict[board] = l
 
-        board_dict[board][0] += round_score
 
 def against_MCTS(scores, net):
     board = np.zeros([8,8], dtype='double')
@@ -191,6 +198,8 @@ class CNN(nn.Module):
         self.FC = nn.Sequential(
             nn.Linear(128,128),
             nn.Dropout(0.3),
+            nn.Linear(128,128),
+            nn.Dropout(0.3),
             nn.Linear(128,1)
         )
 
@@ -216,7 +225,7 @@ class model:
         self.net = self.net.double()
         self.loss = nn.MSELoss()
         self.opt = torch.optim.Adam(self.net.parameters())
-        self.epch = 4
+        self.epch = 3
         mp.set_start_method('forkserver')
 
     def train(self):
@@ -236,11 +245,15 @@ class model:
 
 
             print(len(board_dict))
+            # for i in board_dict.values():
+            #     if i[1] != 1:
+            #         print(i)
 
-            board_list = [(np.frombuffer(board, dtype='double').reshape(8,8), value[0]/value[1]) 
+            board_list = [(np.frombuffer(board, dtype='double').reshape(8,8), (value[0]/value[1]+1)/2) 
                                                                 for board, value in board_dict.items() 
                                                                     if abs(value[2]-value[0]/value[1]) > 0.01]
             print(len(board_list))
+
 
             data_set = DealDataset(board_list)
             data_loader = DataLoader(dataset=data_set,
