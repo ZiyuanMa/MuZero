@@ -237,7 +237,7 @@ class model:
 
             with mp.Pool(pool_num) as p, torch.no_grad():
 
-                for _ in range(10000):
+                for _ in range(10):
                     p.apply_async(self_play, args=(board_dict,self.net,))
 
                 p.close()

@@ -1,58 +1,56 @@
 import math
 import numpy as np
 
-def check_direction(board, row, column, row_direc, col_direc):
-    non_curr = -board[row][column]
+def check_direction(board, row, column, mark, row_direc, col_direc):
     next_row = row + row_direc
     next_column = column + col_direc
 
-    if next_row<0 or next_row>7 or next_column<0 or next_column>7:
-        return False
+    # if next_row<0 or next_row>7 or next_column<0 or next_column>7:
+    #     return False
     
-    if board[next_row][next_column] != non_curr:
-        return False
+    # if board[next_row][next_column] != non_curr:
+    #     return False
 
-    while board[next_row][next_column] == non_curr:
+    while board[next_row][next_column] == -mark:
 
         next_row += row_direc
         next_column += col_direc
         if next_row<0 or next_row>7 or next_column<0 or next_column>7:
             return False
           
-    if board[next_row][next_column] == board[row][column]:
+    if board[next_row][next_column] == mark:
         return True
     
     return False
-
 # check if this position is avaliable
-def check_position(board, row, column):
+def check_position(board, row, column, mark):
 
-    if check_direction(board, row, column, 1, 0):
+        
+    if row+1<=7 and board[row+1][column]==-mark and check_direction(board, row, column, mark, 1, 0):
         return True
 
-    if check_direction(board, row, column, -1, 1):
+    if row-1>=0 and column+1<=7 and board[row-1][column+1]==-mark and check_direction(board, row, column, mark, -1, 1):
         return True
 
-    if check_direction(board, row, column, 0, 1):
+    if column+1<=7 and board[row][column+1]==-mark and check_direction(board, row, column, mark, 0, 1):
         return True
 
-    if check_direction(board, row, column, 1, 1):
+    if row+1<=7 and column+1<=7 and board[row+1][column+1]==-mark and check_direction(board, row, column, mark, 1, 1):
         return True
 
-    if check_direction(board, row, column, -1, 0):
+    if row-1>=0 and board[row-1][column]==-mark and check_direction(board, row, column, mark, -1, 0):
         return True
 
-    if check_direction(board, row, column, 1, -1):
+    if row+1<=7 and column-1>=0 and board[row+1][column-1]==-mark and check_direction(board, row, column, mark, 1, -1):
         return True
 
-    if check_direction(board, row, column, 0, -1):
+    if column-1>=0 and board[row][column-1]==-mark and check_direction(board, row, column, mark, 0, -1):
         return True
 
-    if check_direction(board, row, column, -1, -1):
+    if row-1>=0 and column-1>=0 and board[row-1][column-1]==-mark and check_direction(board, row, column, mark, -1, -1):
         return True
 
     return False
-
 
 def change_direction(board, row, column, row_direc, col_direc):
     non_curr = -board[row][column]
@@ -86,10 +84,11 @@ def change_direction(board, row, column, row_direc, col_direc):
 
 def set_position(board, row, column, mark):
     count = 0
-    board[row][column] = mark
-    if check_position(board, row, column) == False:
+    if check_position(board, row, column, mark) == False:
         raise RuntimeError("set_position: not vaild position")
- 
+    
+    board[row][column] = mark
+
     count += change_direction(board, row, column, -1, 0)
 
     count += change_direction(board, row, column, -1, 1)
@@ -111,14 +110,11 @@ def set_position(board, row, column, mark):
 
 def available_pos(board, current):
     possible_pos = []
-
-    for row in range(8):
-        for column in range(8):
-            if board[row][column] == 0:
-                board[row][column] = current
-                if check_position(board, row, column):
-                    possible_pos.append((row, column))
-                board[row][column] = 0
+    positions = [(row, column) for row in range(8) for column in range(8) if board[row][column] == 0]
+    
+    for row, column in positions:
+        if check_position(board, row, column, current):
+            possible_pos.append((row, column))
 
     return possible_pos
 
