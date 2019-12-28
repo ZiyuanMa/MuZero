@@ -1,5 +1,5 @@
 import random
-from math import sqrt
+from math import sqrt, log
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -49,8 +49,8 @@ def self_play(board_dict, net):
             value = value.item() * curr
             values.append(value)
 
-        # sum_visit = sqrt(sum(visit_times))
-        scores = [value / sqrt(visit+1) for value, visit in zip(values, visit_times)]
+        sum_visit = sum(visit_times)+1
+        scores = [value + sqrt(log(sum_visit)/(visit+1)) for value, visit in zip(values, visit_times)]
         index = scores.index(max(scores))
         set_position(board, positions[index][0], positions[index][1], curr)
 
@@ -249,9 +249,9 @@ class model:
             #     if i[1] != 1:
             #         print(i)
 
-            board_list = [(np.frombuffer(board, dtype='double').reshape(8,8), (value[0]/value[1]+1)/2) 
+            board_list = [(np.frombuffer(board, dtype='double').reshape(8,8), value[0]/value[1]) 
                                                                 for board, value in board_dict.items() 
-                                                                    if abs(value[2]-value[0]/value[1]) > 0.01]
+                                                                    if value[1] > 1]
             print(len(board_list))
 
 
