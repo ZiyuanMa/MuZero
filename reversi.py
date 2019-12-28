@@ -5,12 +5,6 @@ def check_direction(board, row, column, mark, row_direc, col_direc):
     next_row = row + row_direc
     next_column = column + col_direc
 
-    # if next_row<0 or next_row>7 or next_column<0 or next_column>7:
-    #     return False
-    
-    # if board[next_row][next_column] != non_curr:
-    #     return False
-
     while board[next_row][next_column] == -mark:
 
         next_row += row_direc
@@ -22,35 +16,36 @@ def check_direction(board, row, column, mark, row_direc, col_direc):
         return True
     
     return False
+    
 # check if this position is avaliable
 def check_position(board, row, column, mark):
 
-        
+    available_direc = []
     if row+1<=7 and board[row+1][column]==-mark and check_direction(board, row, column, mark, 1, 0):
-        return True
+        available_direc.append((1, 0))
 
     if row-1>=0 and column+1<=7 and board[row-1][column+1]==-mark and check_direction(board, row, column, mark, -1, 1):
-        return True
+        available_direc.append((-1, 1))
 
     if column+1<=7 and board[row][column+1]==-mark and check_direction(board, row, column, mark, 0, 1):
-        return True
+        available_direc.append((0, 1))
 
     if row+1<=7 and column+1<=7 and board[row+1][column+1]==-mark and check_direction(board, row, column, mark, 1, 1):
-        return True
+        available_direc.append((1, 1))
 
     if row-1>=0 and board[row-1][column]==-mark and check_direction(board, row, column, mark, -1, 0):
-        return True
+        available_direc.append((-1, 0))
 
     if row+1<=7 and column-1>=0 and board[row+1][column-1]==-mark and check_direction(board, row, column, mark, 1, -1):
-        return True
+        available_direc.append((1, -1))
 
     if column-1>=0 and board[row][column-1]==-mark and check_direction(board, row, column, mark, 0, -1):
-        return True
+        available_direc.append((0, -1))
 
     if row-1>=0 and column-1>=0 and board[row-1][column-1]==-mark and check_direction(board, row, column, mark, -1, -1):
-        return True
+        available_direc.append((-1, -1))
 
-    return False
+    return available_direc
 
 def change_direction(board, row, column, row_direc, col_direc):
     non_curr = -board[row][column]
@@ -58,52 +53,27 @@ def change_direction(board, row, column, row_direc, col_direc):
     next_column = column + col_direc
     count = 0
 
-    if next_row<0 or next_row>7 or next_column<0 or next_column>7:
-        return 0
-    
-    if board[next_row][next_column] != non_curr:
-        return 0
 
     while board[next_row][next_column] == non_curr:
+        board[next_row][next_column] = -non_curr
+        count += 1
         next_row += row_direc
         next_column += col_direc
-        if next_row<0 or next_row>7 or next_column<0 or next_column>7:
-            return 0
-        
-    if board[next_row][next_column] == board[row][column]:
-        next_row -= row_direc
-        next_column -= col_direc
-        while next_row != row or next_column != column:
-            board[next_row][next_column] = board[row][column]
-            next_row -= row_direc
-            next_column -= col_direc
-            count += 1
-        return count
 
-    return 0
+        if board[next_row][next_column] == -non_curr:
+            return count
+    
 
 def set_position(board, row, column, mark):
     count = 0
-    if check_position(board, row, column, mark) == False:
+    available_direc = check_position(board, row, column, mark)
+    if not available_direc:
         raise RuntimeError("set_position: not vaild position")
     
     board[row][column] = mark
 
-    count += change_direction(board, row, column, -1, 0)
-
-    count += change_direction(board, row, column, -1, 1)
-
-    count += change_direction(board, row, column, 0, 1)
-
-    count += change_direction(board, row, column, 1, 1)
-
-    count += change_direction(board, row, column, 1, 0)
-
-    count += change_direction(board, row, column, 1, -1)
-
-    count += change_direction(board, row, column, 0, -1)
-
-    count += change_direction(board, row, column, -1, -1)
+    for row_direc, col_direc in available_direc:
+        count += change_direction(board, row, column, row_direc, col_direc)
 
     return count
 
