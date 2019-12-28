@@ -158,24 +158,24 @@ class CNN(nn.Module):
         # 8x8 input 6x6 output
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels=1,
-                            out_channels=16,
+                            out_channels=128,
                             kernel_size=3,
                             stride=1,
                             padding=0),
-            nn.BatchNorm2d(16),
+            nn.BatchNorm2d(128),
             nn.LeakyReLU()
         )
 
         # 6x6 input 4x4 output
         self.conv2 = nn.Sequential(
-            nn.Conv2d(16, 64, 3, 1, 0),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(128, 128, 3, 1, 0),
+            nn.BatchNorm2d(128),
             nn.LeakyReLU()
         )
 
         # 4x4 input 1x1 output
         self.conv3 = nn.Sequential(
-            nn.Conv2d(64, 128, 3, 1, 0),
+            nn.Conv2d(128, 128, 3, 1, 0),
             nn.MaxPool2d(2),
             nn.BatchNorm2d(128),
             nn.LeakyReLU()
