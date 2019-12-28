@@ -3,3 +3,4 @@ __pycache__
 venv
 model1.pth
 test.ipynb
+.ipynb_checkpoints
