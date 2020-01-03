@@ -4,17 +4,24 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-import multiprocessing as mp
+import torch.multiprocessing as mp
 from multiprocessing.managers import BaseManager
 pool_num = round(mp.cpu_count()/4)
+from tqdm import tqdm
 from reversi import available_pos, set_position
 from MCTS import MCT_search
 from data_struct import container
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
+#device = torch.device('cpu')
 torch.manual_seed(1261)
 random.seed(1261)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
+# torch.backends.cudnn.deterministic = True
+# torch.backends.cudnn.benchmark = False
 
+@torch.no_grad()
 def self_play(board_dict, net):
     board, curr = board_dict.get_init_board()
     round_boards = []
@@ -31,23 +38,30 @@ def self_play(board_dict, net):
         if len(positions) == 0:
             break
 
-        values = []
         visit_times = []
-        for row, column in positions:
+        next_boards = np.empty([len(positions), 8, 8])
+        for i, position in enumerate(positions):
+            row, column = position
             temp_board = np.copy(board)
             set_position(temp_board, row, column, curr)
 
+            next_boards[i,:,:] = temp_board
             if board_dict.exist(temp_board):
                 visit_times.append(board_dict.get_value(temp_board)[1])
             else:
                 visit_times.append(0)
-            net_input = torch.from_numpy(temp_board).view(1,1,8,8)
-            
-            #value = net(net_input).item() * curr
+            # net_input = torch.from_numpy(temp_board).view(1,1,8,8).to(device)
 
-            value = net(net_input)
-            value = value.item() * curr
-            values.append(value)
+            # net_output = net(net_input)
+            # out_value = net_output.item()
+            # value = out_value * curr
+            # values.append(value)
+        net_input = torch.from_numpy(next_boards).view(-1,1,8,8).to(device)
+        net_output = net(net_input)
+        net_output = net_output.cpu().view(-1)
+        values = np.asarray(net_output) * curr
+
+        values = values.tolist()
 
         sum_visit = sum(visit_times)+1
         scores = [value + sqrt(log(sum_visit)/(visit+1)) for value, visit in zip(values, visit_times)]
@@ -64,8 +78,10 @@ def self_play(board_dict, net):
     elif white_score < black_score:
         board_dict.round_result(round_boards, -1)
 
+    pbar.update()
 
 
+@torch.no_grad()
 def against_MCTS(scores, net):
     board = np.zeros([8,8], dtype='double')
     board[3][3] = 1
@@ -89,9 +105,9 @@ def against_MCTS(scores, net):
             for row, column in positions:
                 temp_board = np.copy(board)
                 set_position(temp_board, row, column, curr)
-                net_input = torch.from_numpy(temp_board).view(1,1,8,8)
-
-                value = net(net_input).item() * curr
+                net_input = torch.from_numpy(temp_board).view(1,1,8,8).to(device)
+                net_output = net(net_input)
+                value = net_output.item() * curr
                 values.append(value)
 
             index = values.index(max(values))
@@ -116,7 +132,7 @@ class DealDataset(Dataset):
     def __init__(self, data):
 
         self.x_data = [board for board, _ in data]
-        self.y_data = [torch.tensor([value], dtype=torch.double) for _, value in data]
+        self.y_data = [torch.tensor([value], dtype=torch.double, device=device) for _, value in data]
         self.len = len(data)
 
     def __getitem__(self, index):
@@ -130,9 +146,9 @@ class DealDataset(Dataset):
     def transform(self, narray):
         if random.choice([True, False]):
             
-            return torch.from_numpy(np.rot90(narray, 2).copy()).view(1,8,8)
+            return torch.from_numpy(np.rot90(narray, 2).copy()).view(1,8,8).to(device)
         else:
-            return torch.from_numpy(narray).view(1,8,8)
+            return torch.from_numpy(narray).view(1,8,8).to(device)
 
 class CNN(nn.Module):
     def __init__(self):
@@ -205,7 +221,7 @@ class CNN(nn.Module):
 class model:
     def __init__(self):
         self.net = CNN()
-        self.net = self.net.double()
+        self.net = self.net.double().to(device)
         self.loss = nn.MSELoss()
         self.opt = torch.optim.Adam(self.net.parameters())
         self.epch = 3
@@ -216,24 +232,29 @@ class model:
         for _ in range(10):
             self.net.eval()
             self.net.share_memory()
-            board_dict = container()
             
-            BaseManager.register('container', container, exposed=['get_init_board', 'meet', '__len__', 'to_filtered_list', '__str__', 'exist', 'round_result', 'get_value'])
+            BaseManager.register('container', container, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
             manager = BaseManager()
             manager.start()
             board_dict = manager.container()
 
-            with mp.Pool(pool_num) as p, torch.no_grad():
+            with mp.Pool(3) as p:
+                pbar = tqdm(total=20)
+                def update():
+                    pbar.update()
 
-                for _ in range(10):
-                    p.apply_async(self_play, args=(board_dict,self.net,))
+                for _ in range(20):
+                    p.apply_async(self_play, args=(board_dict,self.net), callback=update)
+                    #pbar.update()
 
                 p.close()
                 p.join()
 
+
             # board_dict = container()
-            # for _ in range(10):
-            #     self_play(board_dict,self.net)
+            # with torch.no_grad():
+            #     for _ in range(110):
+            #         self_play(board_dict,self.net)
             
 
             
@@ -243,7 +264,7 @@ class model:
             #     if i[1] != 1:
             #         print(i)
 
-            board_list = board_dict.to_filtered_list()
+            board_list = board_dict.to_list()
             print(len(board_list))
 
 
@@ -272,7 +293,7 @@ class model:
             self.net.share_memory()
 
             scores = mp.Manager().list()
-            with mp.Pool(10) as p, torch.no_grad():
+            with mp.Pool(5) as p:
                 
                 for _ in range(10):
                     p.apply_async(against_MCTS, args=(scores, self.net,))

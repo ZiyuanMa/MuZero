@@ -13,21 +13,23 @@ class container:
         self.dict_list[0][board.tobytes()] = [0, 0]
         self.init_layer = 0
         self.aval_num = 1
+        self.init_list = list(self.dict_list[self.init_layer].keys())
         #print(self.dict_list)
 
         #print(len(self.dict_list[0]))
 
     def get_init_board(self):
 
-        bytes_board = random.choice(list(self.dict_list[self.init_layer].keys()))
+        bytes_board = random.choice(self.init_list)
         while self.dict_list[self.init_layer][bytes_board][1] >= 100:
-            bytes_board = random.choice(list(self.dict_list[self.init_layer].keys()))
+            bytes_board = random.choice(self.init_list)
 
         if self.dict_list[self.init_layer][bytes_board][1] == 99:
             self.aval_num -= 1
             if self.aval_num == 0:
                 self.init_layer += 1
-                self.aval_num = len([key for key, value in  self.dict_list[self.init_layer].items() if value[1] < 100])
+                self.init_list = [ b for b in self.dict_list[self.init_layer].keys() if self.dict_list[self.init_layer][b][1] < 100 ]
+                self.aval_num = len(self.init_list)
 
                 if self.aval_num == 0:
                     raise RuntimeError('no avaliable board')
@@ -62,7 +64,7 @@ class container:
 
         return length
 
-    def to_filtered_list(self):
+    def to_list(self):
         l = []
         for d in self.dict_list:
             for key, value in d.items():
@@ -93,11 +95,11 @@ class container:
             return  False
 
     def round_result(self, round_boards, result):
-        if result != 0:
-            for board in round_boards:
-                num = np.count_nonzero(board)-4
-                bytes_board = board.tobytes()
-                self.dict_list[num][bytes_board][0] += result
+
+        for board in round_boards:
+            num = np.count_nonzero(board)-4
+            bytes_board = board.tobytes()
+            self.dict_list[num][bytes_board][0] += result
 
             
 
