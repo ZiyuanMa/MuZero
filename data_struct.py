@@ -3,9 +3,8 @@ import random
 
 class container:
     def __init__(self):
-        self.dict_list = []
-        for _ in range(61):
-            self.dict_list.append(dict())
+        self.dict_list = [dict() for _ in range(61)]
+
         board = np.zeros([8,8], dtype='double')
         board[3][3] = 1
         board[4][4] = 1
@@ -14,7 +13,6 @@ class container:
         self.dict_list[0][board.tobytes()] = [0, 0]
         self.init_layer = 0
         self.aval_num = 1
-        self.round_boards = []
         #print(self.dict_list)
 
         #print(len(self.dict_list[0]))
@@ -40,7 +38,7 @@ class container:
             curr = 1
         else:
             curr = -1
-        return board, curr
+        return np.copy(board), curr
     
     def meet(self, board):
 
@@ -54,7 +52,6 @@ class container:
 
             self.dict_list[num][bytes_board][1] += 1
 
-        self.round_boards.append(self.dict_list[num][bytes_board])
 
 
 
@@ -95,11 +92,13 @@ class container:
         else:
             return  False
 
-    def round_result(self, result):
+    def round_result(self, round_boards, result):
         if result != 0:
-            for l in self.round_boards:
-                l[0] += result
-        self.round_boards.clear()
+            for board in round_boards:
+                num = np.count_nonzero(board)-4
+                bytes_board = board.tobytes()
+                self.dict_list[num][bytes_board][0] += result
+
             
 
     def get_value(self, board):

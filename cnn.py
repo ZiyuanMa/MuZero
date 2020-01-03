@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-import torch.multiprocessing as mp
+import multiprocessing as mp
 from multiprocessing.managers import BaseManager
 pool_num = round(mp.cpu_count()/4)
 from reversi import available_pos, set_position
@@ -17,10 +17,11 @@ torch.backends.cudnn.benchmark = False
 
 def self_play(board_dict, net):
     board, curr = board_dict.get_init_board()
-
+    round_boards = []
     while True:
 
         board_dict.meet(board)
+        round_boards.append(np.copy(board))
 
         positions = available_pos(board, curr)
         if len(positions) == 0:
@@ -59,11 +60,10 @@ def self_play(board_dict, net):
     black_score = np.count_nonzero(board==-1)
 
     if white_score > black_score:
-        board_dict.round_result(1)
+        board_dict.round_result(round_boards, 1)
     elif white_score < black_score:
-        board_dict.round_result(-1)
-    else:
-        board_dict.round_result(0)
+        board_dict.round_result(round_boards, -1)
+
 
 
 def against_MCTS(scores, net):
@@ -225,7 +225,7 @@ class model:
 
             with mp.Pool(pool_num) as p, torch.no_grad():
 
-                for _ in range(110):
+                for _ in range(10):
                     p.apply_async(self_play, args=(board_dict,self.net,))
 
                 p.close()
@@ -238,7 +238,7 @@ class model:
 
             
             print(len(board_dict))
-
+            print(board_dict)
             # for i in board_dict.values():
             #     if i[1] != 1:
             #         print(i)
