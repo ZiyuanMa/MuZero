@@ -17,9 +17,12 @@ torch.backends.cudnn.benchmark = False
 
 def self_play(board_dict, net):
     board, curr = board_dict.get_init_board()
+    # print(board)
     board = np.copy(board)
-    round_boards = list()
     while True:
+
+        board_dict.meet(board)
+
         positions = available_pos(board, curr)
         if len(positions) == 0:
             curr = -curr
@@ -33,13 +36,11 @@ def self_play(board_dict, net):
         for row, column in positions:
             temp_board = np.copy(board)
             set_position(temp_board, row, column, curr)
-            bytes_board = temp_board.tobytes()
 
-            if bytes_board not in board_dict:
-                visit_times.append(0)
+            if board_dict.exist(temp_board):
+                visit_times.append(board_dict.get_value(temp_board)[1])
             else:
-                visit_times.append(board_dict[temp_board][1])
-
+                visit_times.append(0)
             net_input = torch.from_numpy(temp_board).view(1,1,8,8)
             
             #value = net(net_input).item() * curr
@@ -53,7 +54,6 @@ def self_play(board_dict, net):
         index = scores.index(max(scores))
         set_position(board, positions[index][0], positions[index][1], curr)
 
-        board_dict.meet(board)
         # if board.tobytes() not in board_dict:
         #     board_dict[board.tobytes()] = [0, 1, values[index]*curr]
         # else:
@@ -63,26 +63,19 @@ def self_play(board_dict, net):
         #     board_dict[board.tobytes()] = l
 
 
-        round_boards.append(board)
         curr = -curr
+
+    board_dict.meet(board)
 
     white_score = np.count_nonzero(board==1)
     black_score = np.count_nonzero(board==-1)
 
-    print(len(round_boards))
     if white_score > black_score:
-
-        for board in round_boards:
-            l = board_dict[board]
-            l[0] += 1
-            board_dict[board] = l
+        board_dict.round_result(1)
     elif white_score < black_score:
-
-        for board in round_boards:
-            l = board_dict[board]
-            l[0] -= 1
-            board_dict[board] = l
-
+        board_dict.round_result(-1)
+    else:
+        board_dict.round_result(0)
 
 
 def against_MCTS(scores, net):
