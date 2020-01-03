@@ -17,8 +17,7 @@ torch.backends.cudnn.benchmark = False
 
 def self_play(board_dict, net):
     board, curr = board_dict.get_init_board()
-    # print(board)
-    board = np.copy(board)
+
     while True:
 
         board_dict.meet(board)
@@ -54,18 +53,7 @@ def self_play(board_dict, net):
         index = scores.index(max(scores))
         set_position(board, positions[index][0], positions[index][1], curr)
 
-        # if board.tobytes() not in board_dict:
-        #     board_dict[board.tobytes()] = [0, 1, values[index]*curr]
-        # else:
-
-        #     l = board_dict[board.tobytes()]
-        #     l[1] += 1
-        #     board_dict[board.tobytes()] = l
-
-
         curr = -curr
-
-    board_dict.meet(board)
 
     white_score = np.count_nonzero(board==1)
     black_score = np.count_nonzero(board==-1)
@@ -153,26 +141,26 @@ class CNN(nn.Module):
         # 8x8 input 6x6 output
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels=1,
-                            out_channels=128,
+                            out_channels=256,
                             kernel_size=3,
                             stride=1,
                             padding=0),
-            nn.BatchNorm2d(128),
+            nn.BatchNorm2d(256),
             nn.LeakyReLU()
         )
 
         # 6x6 input 4x4 output
         self.conv2 = nn.Sequential(
-            nn.Conv2d(128, 128, 3, 1, 0),
-            nn.BatchNorm2d(128),
+            nn.Conv2d(256, 256, 3, 1, 0),
+            nn.BatchNorm2d(256),
             nn.LeakyReLU()
         )
 
         # 4x4 input 1x1 output
         self.conv3 = nn.Sequential(
-            nn.Conv2d(128, 128, 3, 1, 0),
+            nn.Conv2d(256, 256, 3, 1, 0),
             nn.MaxPool2d(2),
-            nn.BatchNorm2d(128),
+            nn.BatchNorm2d(256),
             nn.LeakyReLU()
         )
 
@@ -191,11 +179,11 @@ class CNN(nn.Module):
 
         # fully-connected layer
         self.FC = nn.Sequential(
-            nn.Linear(128,128),
+            nn.Linear(256,256),
             nn.Dropout(0.3),
-            nn.Linear(128,128),
+            nn.Linear(256,256),
             nn.Dropout(0.3),
-            nn.Linear(128,1)
+            nn.Linear(256,1)
         )
 
     def forward(self, x):
@@ -228,27 +216,27 @@ class model:
         for _ in range(10):
             self.net.eval()
             self.net.share_memory()
-            #board_dict = container()
-            
-            # BaseManager.register('container', container, exposed=['__getitem__', '__setitem__',
-            #             'get_init_board', 'meet', '__len__', 'to_filtered_list', '__str__'])
-            # manager = BaseManager()
-            # manager.start()
-            # board_dict = manager.container()
-
-            # with mp.Pool(pool_num) as p, torch.no_grad():
-
-            #     for _ in range(100):
-            #         p.apply_async(self_play, args=(board_dict,self.net,))
-
-            #     p.close()
-            #     p.join()
-
             board_dict = container()
-            for _ in range(10):
-                self_play(board_dict,self.net)
+            
+            BaseManager.register('container', container, exposed=['get_init_board', 'meet', '__len__', 'to_filtered_list', '__str__', 'exist', 'round_result', 'get_value'])
+            manager = BaseManager()
+            manager.start()
+            board_dict = manager.container()
+
+            with mp.Pool(pool_num) as p, torch.no_grad():
+
+                for _ in range(110):
+                    p.apply_async(self_play, args=(board_dict,self.net,))
+
+                p.close()
+                p.join()
+
+            # board_dict = container()
+            # for _ in range(10):
+            #     self_play(board_dict,self.net)
             
 
+            
             print(len(board_dict))
 
             # for i in board_dict.values():
@@ -288,8 +276,7 @@ class model:
                 
                 for _ in range(10):
                     p.apply_async(against_MCTS, args=(scores, self.net,))
-                    # score = p.apply_async(against_MCTS, args=(self.net,)).get()
-                    # scores.append(score)
+
 
                 p.close()
                 p.join()

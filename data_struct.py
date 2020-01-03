@@ -44,8 +44,6 @@ class container:
     
     def meet(self, board):
 
-        board = np.copy(board)
-
         num = np.count_nonzero(board)-4
         bytes_board = board.tobytes()
         if bytes_board not in self.dict_list[num]:
@@ -79,9 +77,11 @@ class container:
     def __str__(self):
         string = ''
         for i, d in enumerate(self.dict_list):
-            if len(d) != 0:
+            if len(d) != 0 and i < 4:
                 string += 'layer ' + str(i+1) + ':\n'
-                for value in d.values():
+                for key, value in d.items():
+                    #board = np.frombuffer(key, dtype='double').reshape(8,8)
+                    #string += board.__str__()
                     string += '\t' + str(value[0]) + '  ' + str(value[1]) + '\n'
 
         return string
