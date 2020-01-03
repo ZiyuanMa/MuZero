@@ -5,21 +5,19 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import torch.multiprocessing as mp
+from multiprocessing.managers import BaseManager
 pool_num = round(mp.cpu_count()/4)
 from reversi import available_pos, set_position
 from MCTS import MCT_search
+from data_struct import container
 torch.manual_seed(1261)
 random.seed(1261)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 def self_play(board_dict, net):
-    board = np.zeros([8,8], dtype='double')
-    board[3][3] = 1
-    board[4][4] = 1
-    board[3][4] = -1
-    board[4][3] = -1
-    curr = 1
+    board, curr = board_dict.get_init_board()
+    board = np.copy(board)
     round_boards = list()
     while True:
         positions = available_pos(board, curr)
@@ -36,10 +34,11 @@ def self_play(board_dict, net):
             temp_board = np.copy(board)
             set_position(temp_board, row, column, curr)
             bytes_board = temp_board.tobytes()
+
             if bytes_board not in board_dict:
                 visit_times.append(0)
             else:
-                visit_times.append(board_dict[bytes_board][1])
+                visit_times.append(board_dict[temp_board][1])
 
             net_input = torch.from_numpy(temp_board).view(1,1,8,8)
             
@@ -54,21 +53,23 @@ def self_play(board_dict, net):
         index = scores.index(max(scores))
         set_position(board, positions[index][0], positions[index][1], curr)
 
-        if board.tobytes() not in board_dict:
-            board_dict[board.tobytes()] = [0, 1, values[index]*curr]
-        else:
+        board_dict.meet(board)
+        # if board.tobytes() not in board_dict:
+        #     board_dict[board.tobytes()] = [0, 1, values[index]*curr]
+        # else:
 
-            l = board_dict[board.tobytes()]
-            l[1] += 1
-            board_dict[board.tobytes()] = l
+        #     l = board_dict[board.tobytes()]
+        #     l[1] += 1
+        #     board_dict[board.tobytes()] = l
 
 
-        round_boards.append(board.tobytes())
+        round_boards.append(board)
         curr = -curr
 
     white_score = np.count_nonzero(board==1)
     black_score = np.count_nonzero(board==-1)
 
+    print(len(round_boards))
     if white_score > black_score:
 
         for board in round_boards:
@@ -82,75 +83,6 @@ def self_play(board_dict, net):
             l[0] -= 1
             board_dict[board] = l
 
-def self_play2(board_dict, net, start_board):
-    board = np.frombuffer(random.choice(start_board)[0], dtype='double').reshape(8,8)
-
-    if np.nonzero(board)%2 == 0:
-        curr = 1
-    else:
-        curr = -1
-    round_boards = list()
-
-    while True:
-        positions = available_pos(board, curr)
-        if len(positions) == 0:
-            curr = -curr
-            positions = available_pos(board, curr)
-
-        if len(positions) == 0:
-            break
-
-        values = []
-        visit_times = []
-        for row, column in positions:
-            temp_board = np.copy(board)
-            set_position(temp_board, row, column, curr)
-            bytes_board = temp_board.tobytes()
-            if bytes_board not in board_dict:
-                visit_times.append(0)
-            else:
-                visit_times.append(board_dict[bytes_board][1])
-
-            net_input = torch.from_numpy(temp_board).view(1,1,8,8)
-            
-            #value = net(net_input).item() * curr
-
-            value = net(net_input)
-            value = value.item() * curr
-            values.append(value)
-
-        sum_visit = sum(visit_times)+1
-        scores = [value + sqrt(log(sum_visit)/(visit+1)) for value, visit in zip(values, visit_times)]
-        index = scores.index(max(scores))
-        set_position(board, positions[index][0], positions[index][1], curr)
-
-        if board.tobytes() not in board_dict:
-            board_dict[board.tobytes()] = [0, 1, values[index]*curr]
-        else:
-
-            l = board_dict[board.tobytes()]
-            l[1] += 1
-            board_dict[board.tobytes()] = l
-
-
-        round_boards.append(board.tobytes())
-        curr = -curr
-
-    white_score = np.count_nonzero(board==1)
-    black_score = np.count_nonzero(board==-1)
-
-    if white_score > black_score:
-
-        for board in round_boards:
-            l = board_dict[board]
-            l[0] += 1
-            board_dict[board] = l
-    elif white_score < black_score:
-
-        for board in round_boards:
-            l = board_dict[board]
-            l[0] -= 1
-            board_dict[board] = l
 
 
 def against_MCTS(scores, net):
@@ -303,38 +235,34 @@ class model:
         for _ in range(10):
             self.net.eval()
             self.net.share_memory()
-            board_dict = mp.Manager().dict()
+            #board_dict = container()
+            
+            # BaseManager.register('container', container, exposed=['__getitem__', '__setitem__',
+            #             'get_init_board', 'meet', '__len__', 'to_filtered_list', '__str__'])
+            # manager = BaseManager()
+            # manager.start()
+            # board_dict = manager.container()
 
-            with mp.Pool(pool_num) as p, torch.no_grad():
+            # with mp.Pool(pool_num) as p, torch.no_grad():
 
-                for _ in range(10):
-                    p.apply_async(self_play, args=(board_dict,self.net,))
+            #     for _ in range(100):
+            #         p.apply_async(self_play, args=(board_dict,self.net,))
 
-                p.close()
-                p.join()
+            #     p.close()
+            #     p.join()
 
-            for _ in range(99):
-                l = [(board, value[1]) for board, value in board_dict.items() if value[1] < 100]
-                l.sort(key=lambda x:x[1], reverse=True)
-                l = l[:10]
-
-
-                with mp.Pool(pool_num) as p, torch.no_grad():
-
-                    for _ in range(10):
-                        p.apply_async(self_play2, args=(board_dict,self.net,l,))
-
-                p.close()
-                p.join()
+            board_dict = container()
+            for _ in range(10):
+                self_play(board_dict,self.net)
+            
 
             print(len(board_dict))
+
             # for i in board_dict.values():
             #     if i[1] != 1:
             #         print(i)
 
-            board_list = [(np.frombuffer(board, dtype='double').reshape(8,8), value[0]/value[1]) 
-                                                                for board, value in board_dict.items() 
-                                                                    if value[1] > 1]
+            board_list = board_dict.to_filtered_list()
             print(len(board_list))
 
 
