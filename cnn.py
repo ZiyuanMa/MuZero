@@ -78,7 +78,6 @@ def self_play(board_dict, net):
     elif white_score < black_score:
         board_dict.round_result(round_boards, -1)
 
-    pbar.update()
 
 
 @torch.no_grad()
@@ -240,7 +239,7 @@ class model:
 
             with mp.Pool(3) as p:
                 pbar = tqdm(total=20)
-                def update():
+                def update(ret):
                     pbar.update()
 
                 for _ in range(20):
@@ -249,6 +248,7 @@ class model:
 
                 p.close()
                 p.join()
+                pbar.close()
 
 
             # board_dict = container()
