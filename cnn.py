@@ -233,7 +233,7 @@ class model:
             
             board_dict = manager.container()
 
-            game_num = 500
+            game_num = 10000
             with mp.Pool(2) as p:
                 pbar = tqdm(total=game_num)
                 def update(ret):
