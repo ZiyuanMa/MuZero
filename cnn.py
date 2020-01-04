@@ -18,10 +18,12 @@ else:
 torch.manual_seed(1261)
 random.seed(1261)
 # torch.backends.cudnn.deterministic = True
-# torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.benchmark = True
+
 
 @torch.no_grad()
 def self_play(board_dict, net):
+    global t
     board, curr = board_dict.get_init_board()
     round_boards = []
     while True:
@@ -37,7 +39,6 @@ def self_play(board_dict, net):
         if len(positions) == 0:
             break
 
-        values = []
         visit_times = []
         next_boards = np.empty([len(positions), 8, 8])
         for i, position in enumerate(positions):
@@ -50,18 +51,11 @@ def self_play(board_dict, net):
                 visit_times.append(board_dict.get_value(temp_board)[1])
             else:
                 visit_times.append(0)
-            # net_input = torch.from_numpy(temp_board).view(1,1,8,8).to(device)
 
-            # net_output = net(net_input)
-            # out_value = net_output.item()
-            # value = out_value * curr
-            # values.append(value)
-        net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8).to(device)
-
+        net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8)
         net_output = net(net_input)
         net_output = net_output.view(-1)
         values = np.asarray(net_output) * curr
-
         values = values.tolist()
 
         sum_visit = sum(visit_times)+1
@@ -90,6 +84,7 @@ def against_MCTS(scores, net):
     board[4][3] = -1
     curr = 1
     self_mark = random.choice([1, -1])
+
     while True:
         positions = available_pos(board, curr)
         if len(positions) == 0:
@@ -100,15 +95,19 @@ def against_MCTS(scores, net):
             break
 
         if curr == self_mark:
-            values = []
 
-            for row, column in positions:
+            next_boards = np.empty([len(positions), 8, 8])
+            for i, position in enumerate(positions):
+                row, column = position
                 temp_board = np.copy(board)
                 set_position(temp_board, row, column, curr)
-                net_input = torch.from_numpy(temp_board).float().view(1,1,8,8).to(device)
-                net_output = net(net_input)
-                value = net_output.item() * curr
-                values.append(value)
+                next_boards[i,:,:] = temp_board
+
+            net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8)
+            net_output = net(net_input)
+            net_output = net_output.view(-1)
+            values = np.asarray(net_output) * curr
+            values = values.tolist()
 
             index = values.index(max(values))
             set_position(board, positions[index][0], positions[index][1], curr)
@@ -124,8 +123,6 @@ def against_MCTS(scores, net):
         scores.append(self_mark)
     elif white_score < black_score:
         scores.append(-self_mark)
-    else:
-        scores.append(0)
 
 class DealDataset(Dataset):
 
@@ -221,21 +218,20 @@ class CNN(nn.Module):
 class model:
     def __init__(self):
         self.net = CNN()
-        self.net = self.net.to(device)
+        self.net.share_memory()
         self.loss = nn.MSELoss()
         self.opt = torch.optim.Adam(self.net.parameters())
         self.epch = 3
         mp.set_start_method('forkserver')
 
     def train(self):
+        BaseManager.register('container', container, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
+        manager = BaseManager()
+        manager.start()
 
         for _ in range(10):
             self.net.eval()
-            self.net.share_memory()
             
-            BaseManager.register('container', container, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
-            manager = BaseManager()
-            manager.start()
             board_dict = manager.container()
 
             game_num = 100
@@ -247,20 +243,16 @@ class model:
                 for _ in range(game_num):
                     p.apply_async(self_play, args=(board_dict,self.net), callback=update)
 
-
                 p.close()
                 p.join()
                 pbar.close()
-
 
             # board_dict = container()
             # for _ in range(110):
             #     self_play(board_dict,self.net)
             
-
-            
             print(len(board_dict))
-            print(board_dict)
+
             # for i in board_dict.values():
             #     if i[1] != 1:
             #         print(i)
@@ -268,12 +260,14 @@ class model:
             board_list = board_dict.to_list()
             print(len(board_list))
 
-
             data_set = DealDataset(board_list)
             data_loader = DataLoader(dataset=data_set,
+                            num_workers=4,
+                            pin_memory=True,
                             batch_size=256,
                             shuffle=True)
 
+            self.net.to(device)
             self.net.train()
             for _ in range(self.epch):
                 epch_loss = 0
@@ -289,34 +283,19 @@ class model:
                 epch_loss /= len(data_loader)
                 print('loss: %.6f' %epch_loss)
 
-            #self.test()
-            self.net.eval()
-            self.net.share_memory()
+            self.net.to(torch.device('cpu'))
 
-            scores = mp.Manager().list()
-            with mp.Pool(10) as p:
-                
-                for _ in range(10):
-                    p.apply_async(against_MCTS, args=(scores, self.net,))
-
-
-                # p.close()
-                # p.join()
-
-            print('test score: %d' %sum(scores))
+            self.test()
 
             torch.save(self.net.state_dict(), './model1.pth')
 
     def test(self):
         self.net.eval()
-        self.net.share_memory()
-
-        scores = []
-        with mp.Pool(10) as p, torch.no_grad():
+        scores = mp.Manager().list()
+        with mp.Pool(10) as p:
             
             for _ in range(10):
-                score = p.apply_async(against_MCTS, args=(self.net,)).get()
-                scores.append(score)
+                p.apply_async(against_MCTS, args=(scores, self.net,))
 
             p.close()
             p.join()
@@ -328,3 +307,31 @@ class model:
 if __name__ == '__main__':
     m = model()
     m.train()
+
+    # net = CNN()
+    # net.eval()
+    # #net.share_memory()
+    # game_num = 100
+
+    # BaseManager.register('container', container, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
+    # manager = BaseManager()
+    # manager.start()
+    # board_dict = manager.container()
+
+
+    # with mp.Pool(4) as p:
+    #     pbar = tqdm(total=game_num)
+    #     def update(ret):
+    #         pbar.update()
+
+    #     for _ in range(game_num):
+    #         p.apply_async(self_play, args=(board_dict,net), callback=update)
+
+
+    #     p.close()
+    #     p.join()
+    #     pbar.close()
+
+    # board_dict = container()
+    # for _ in tqdm(range(game_num)):
+    #     self_play(board_dict,net)
