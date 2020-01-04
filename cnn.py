@@ -209,7 +209,6 @@ class CNN(nn.Module):
         # x2_out = self.conv5(x2_out)
 
 
-
         out = self.FC(x1_out.view(x1_out.size(0),-1))
 
         return out
