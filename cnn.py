@@ -56,7 +56,8 @@ def self_play(board_dict, net):
             # out_value = net_output.item()
             # value = out_value * curr
             # values.append(value)
-        net_input = torch.from_numpy(next_boards).view(-1,1,8,8).to(device)
+        net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8).to(device)
+
         net_output = net(net_input)
         net_output = net_output.cpu().view(-1)
         values = np.asarray(net_output) * curr
@@ -131,7 +132,7 @@ class DealDataset(Dataset):
     def __init__(self, data):
 
         self.x_data = [board for board, _ in data]
-        self.y_data = [torch.tensor([value], dtype=torch.double, device=device) for _, value in data]
+        self.y_data = [torch.tensor([value], dtype=torch.float, device=device) for _, value in data]
         self.len = len(data)
 
     def __getitem__(self, index):
@@ -145,9 +146,9 @@ class DealDataset(Dataset):
     def transform(self, narray):
         if random.choice([True, False]):
             
-            return torch.from_numpy(np.rot90(narray, 2).copy()).view(1,8,8).to(device)
+            return torch.from_numpy(np.rot90(narray, 2).copy()).float().view(1,8,8).to(device)
         else:
-            return torch.from_numpy(narray).view(1,8,8).to(device)
+            return torch.from_numpy(narray).float().view(1,8,8).to(device)
 
 class CNN(nn.Module):
     def __init__(self):
@@ -220,7 +221,7 @@ class CNN(nn.Module):
 class model:
     def __init__(self):
         self.net = CNN()
-        self.net = self.net.double().to(device)
+        self.net = self.net.float().to(device)
         self.loss = nn.MSELoss()
         self.opt = torch.optim.Adam(self.net.parameters())
         self.epch = 3
@@ -237,14 +238,15 @@ class model:
             manager.start()
             board_dict = manager.container()
 
+            num = 100
             with mp.Pool(3) as p:
-                pbar = tqdm(total=20)
+                pbar = tqdm(total=num)
                 def update(ret):
                     pbar.update()
 
-                for _ in range(20):
+                for _ in range(num):
                     p.apply_async(self_play, args=(board_dict,self.net), callback=update)
-                    #pbar.update()
+
 
                 p.close()
                 p.join()

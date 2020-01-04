@@ -5,7 +5,7 @@ class container:
     def __init__(self):
         self.dict_list = [dict() for _ in range(61)]
 
-        board = np.zeros([8,8], dtype='double')
+        board = np.zeros([8,8], dtype='float')
         board[3][3] = 1
         board[4][4] = 1
         board[3][4] = -1
@@ -34,7 +34,7 @@ class container:
                 if self.aval_num == 0:
                     raise RuntimeError('no avaliable board')
 
-        board = np.frombuffer(bytes_board, dtype='double').reshape(8,8)
+        board = np.frombuffer(bytes_board, dtype='float').reshape(8,8)
         #print(np.count_nonzero(board))
         if np.count_nonzero(board) % 2 == 0:
             curr = 1
@@ -69,7 +69,7 @@ class container:
         for d in self.dict_list:
             for key, value in d.items():
                 if value[1] > 1:
-                    l.append((np.frombuffer(key, dtype='double').reshape(8,8), value[0]/value[1]))
+                    l.append((np.frombuffer(key, dtype='float').reshape(8,8), value[0]/value[1]))
 
         return l
 
