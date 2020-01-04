@@ -129,7 +129,7 @@ class DealDataset(Dataset):
     def __init__(self, data):
 
         self.x_data = [board for board, _ in data]
-        self.y_data = [torch.tensor([value], dtype=torch.float, device=device) for _, value in data]
+        self.y_data = [torch.tensor([value], dtype=torch.float) for _, value in data]
         self.len = len(data)
 
     def __getitem__(self, index):
@@ -143,9 +143,9 @@ class DealDataset(Dataset):
     def transform(self, narray):
         if random.choice([True, False]):
             
-            return torch.from_numpy(np.rot90(narray, 2).copy()).float().view(1,8,8).to(device)
+            return torch.from_numpy(np.rot90(narray, 2).copy()).float().view(1,8,8)
         else:
-            return torch.from_numpy(narray).float().view(1,8,8).to(device)
+            return torch.from_numpy(narray).float().view(1,8,8)
 
 class CNN(nn.Module):
     def __init__(self):
@@ -220,21 +220,21 @@ class model:
         self.net.share_memory()
         self.loss = nn.MSELoss()
         self.opt = torch.optim.Adam(self.net.parameters())
-        self.epch = 3
-        mp.set_start_method('forkserver')
+        self.epch = 4
+        mp.set_start_method('spawn')
 
     def train(self):
         BaseManager.register('container', container, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
         manager = BaseManager()
         manager.start()
 
-        for _ in range(10):
+        for i in range(10):
             self.net.eval()
             
             board_dict = manager.container()
 
-            game_num = 100
-            with mp.Pool(4) as p:
+            game_num = 500
+            with mp.Pool(2) as p:
                 pbar = tqdm(total=game_num)
                 def update(ret):
                     pbar.update()
@@ -271,7 +271,7 @@ class model:
             for _ in range(self.epch):
                 epch_loss = 0
                 for boards, values in data_loader:
-
+                    boards, values = boards.to(device), values.to(device)
                     self.opt.zero_grad()
 
                     outputs = self.net(boards)
@@ -283,8 +283,9 @@ class model:
                 print('loss: %.6f' %epch_loss)
 
             self.net.to(torch.device('cpu'))
-
-            self.test()
+            
+            if i % 2 == 1:
+                self.test()
 
             torch.save(self.net.state_dict(), './model1.pth')
 
