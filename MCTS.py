@@ -1,8 +1,9 @@
 from reversi import available_pos, set_position
 import random
 import numpy as np
+import torch.multiprocessing as mp
 
-def self_play(board, mark):
+def self_play(board, mark, scores):
 
     temp_board = np.copy(board)
 
@@ -26,11 +27,13 @@ def self_play(board, mark):
     player_score = np.count_nonzero(temp_board==-mark)
 
     if program_score > player_score:
-        return 1
+        # return 1
+        scores.append(1)
     elif program_score < player_score:
-        return -1
-    else:
-        return 0
+        scores.append(1)
+    #     return -1
+    # else:
+    #     return 0
 
 
 def MCT_search(board, mark):
@@ -44,10 +47,17 @@ def MCT_search(board, mark):
         set_position(temp_board, row, column, mark)
         results = []
 
-        for _ in range(500):
-            results.append(self_play(temp_board,mark))
+        # for _ in range(500):
+        #     results.append(self_play(temp_board,mark))
+        scores = mp.Manager().list()
+        with mp.Pool(12) as p:
+            
+            for _ in range(500):
+                p.apply_async(self_play, args=(temp_board, mark, scores))
 
-        scores.append(sum(results))
+            p.close()
+            p.join()
+        # scores.append(sum(results))
 
 
     index = scores.index(max(scores))

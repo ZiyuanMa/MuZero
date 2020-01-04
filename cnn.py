@@ -1,3 +1,4 @@
+from MCTS import MCT_search
 import random
 from math import sqrt, log
 import torch
@@ -8,7 +9,6 @@ import torch.multiprocessing as mp
 from multiprocessing.managers import BaseManager
 from tqdm import tqdm
 from reversi import available_pos, set_position
-from MCTS import MCT_search
 from data_struct import container
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -23,7 +23,6 @@ torch.backends.cudnn.benchmark = True
 
 @torch.no_grad()
 def self_play(board_dict, net):
-    global t
     board, curr = board_dict.get_init_board()
     round_boards = []
     while True:
@@ -291,23 +290,82 @@ class model:
 
     def test(self):
         self.net.eval()
-        scores = mp.Manager().list()
-        with mp.Pool(10) as p:
-            
-            for _ in range(10):
-                p.apply_async(against_MCTS, args=(scores, self.net,))
+        # scores = mp.Manager().list()
+        # with mp.Pool(10) as p:
+        torch.set_num_threads(12)
+        print(torch.get_num_threads())
+        
+        scores = []
+        for _ in range(10):
+            against_MCTS(scores, self.net)
+                #p.apply(against_MCTS, args=(scores, self.net,))
 
-            p.close()
-            p.join()
+            # p.close()
+            # p.join()
 
         print('test score: %d' %sum(scores))
+    
+    @torch.no_grad()
+    def s_play(self):
+        self.net.eval()
+        # torch.set_num_threads(8)
+        board_dict = container()
+        for _ in tqdm(range(100)):
+            board, curr = board_dict.get_init_board()
+            round_boards = []
+            while True:
 
+                board_dict.meet(board)
+                round_boards.append(np.copy(board))
 
+                positions = available_pos(board, curr)
+                if len(positions) == 0:
+                    curr = -curr
+                    positions = available_pos(board, curr)
+
+                if len(positions) == 0:
+                    break
+
+                visit_times = []
+                next_boards = np.empty([len(positions), 8, 8])
+                for i, position in enumerate(positions):
+                    row, column = position
+                    temp_board = np.copy(board)
+                    set_position(temp_board, row, column, curr)
+
+                    next_boards[i,:,:] = temp_board
+                    if board_dict.exist(temp_board):
+                        visit_times.append(board_dict.get_value(temp_board)[1])
+                    else:
+                        visit_times.append(0)
+
+                net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8)
+                net_output = self.net(net_input)
+                net_output = net_output.view(-1)
+                values = np.asarray(net_output) * curr
+                values = values.tolist()
+
+                sum_visit = sum(visit_times)+1
+                scores = [value + sqrt(log(sum_visit)/(visit+1)) for value, visit in zip(values, visit_times)]
+                index = scores.index(max(scores))
+                set_position(board, positions[index][0], positions[index][1], curr)
+
+                curr = -curr
+
+            white_score = np.count_nonzero(board==1)
+            black_score = np.count_nonzero(board==-1)
+
+            if white_score > black_score:
+                board_dict.round_result(round_boards, 1)
+            elif white_score < black_score:
+                board_dict.round_result(round_boards, -1)
 
 if __name__ == '__main__':
     m = model()
-    m.train()
+    # m.train()
 
+    # m.test()
+    m.s_play()
     # net = CNN()
     # net.eval()
     # #net.share_memory()
@@ -319,7 +377,7 @@ if __name__ == '__main__':
     # board_dict = manager.container()
 
 
-    # with mp.Pool(4) as p:
+    # with mp.Pool(2) as p:
     #     pbar = tqdm(total=game_num)
     #     def update(ret):
     #         pbar.update()
@@ -332,6 +390,7 @@ if __name__ == '__main__':
     #     p.join()
     #     pbar.close()
 
+    # torch.set_num_threads(12)
     # board_dict = container()
     # for _ in tqdm(range(game_num)):
     #     self_play(board_dict,net)
