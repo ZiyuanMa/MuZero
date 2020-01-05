@@ -152,13 +152,13 @@ class model:
             for _ in tqdm(range(self.game_num)):
                 self.self_play()
             
-            print(len(board_dict))
+            print(len(self.board_dict))
 
             # for i in board_dict.values():
             #     if i[1] != 1:
             #         print(i)
 
-            board_list = board_dict.to_list()
+            board_list = self.board_dict.to_list()
             print(len(board_list))
 
             data_set = DealDataset(board_list)
