@@ -44,15 +44,15 @@ def MCT_search(board, mark):
         set_position(temp_board, row, column, mark)
 
 
-        scores = mp.Manager().list()
+        score = mp.Manager().list()
         with mp.Pool(12) as p:
             
             for _ in range(500):
-                p.apply_async(self_play, args=(temp_board, mark, scores))
+                p.apply_async(self_play, args=(temp_board, mark, score))
 
             p.close()
             p.join()
-
+        scores.append(sum(score))
 
     index = scores.index(max(scores))
     row, column = positions[index]
