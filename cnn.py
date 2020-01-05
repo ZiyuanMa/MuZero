@@ -1,4 +1,7 @@
 from MCTS import MCT_search
+from parameters import *
+from reversi import available_pos, set_position
+from data_struct import container
 import random
 from math import sqrt, log
 import torch
@@ -6,8 +9,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from tqdm import tqdm
-from reversi import available_pos, set_position
-from data_struct import container
+import os
 if torch.cuda.is_available():
     device = torch.device('cuda')
 else:
@@ -112,20 +114,42 @@ class CNN(nn.Module):
 class model:
     def __init__(self):
         self.net = CNN()
-        self.net.share_memory()
         self.loss = nn.MSELoss()
-        self.opt = torch.optim.Adam(self.net.parameters())
-        self.epch = 4
+        self.optim = torch.optim.Adam(self.net.parameters())
+
+        if not self.load():
+            self.round = round
+            self.start_round = 0
+            self.game_num = game_num
+            self.epoch = epoch
+
+    def load(self):
+        if not os.path.exists('./model.pth'):
+            return False
+
+        checkpoint = torch.load('./model.pth')
+        if checkpoint['game_num'] != game_num or checkpoint['epoch'] != epoch or checkpoint['round'] != round:
+            return False
+
+        self.net.load_state_dict(checkpoint['net'])
+        self.optim.load_state_dict(checkpoint['optim'])
+        self.round = checkpoint['round']
+        self.start_round = checkpoint['start_round']
+        self.game_num = checkpoint['game_num']
+        self.epoch = checkpoint['epoch']
+
+        return True
 
     def train(self):
 
-        for i in range(10):
+        for i in range(self.start_round, self.round):
+            print('round ' + str(i+1) + ' start')
             self.net.eval()
             
             self.board_dict = container()
 
 
-            for _ in tqdm(range(10000)):
+            for _ in tqdm(range(self.game_num)):
                 self.self_play()
             
             print(len(board_dict))
@@ -146,26 +170,33 @@ class model:
 
             self.net.to(device)
             self.net.train()
-            for _ in range(self.epch):
-                epch_loss = 0
+            for _ in range(self.epoch):
+                epoch_loss = 0
                 for boards, values in data_loader:
                     boards, values = boards.to(device), values.to(device)
-                    self.opt.zero_grad()
+                    self.optim.zero_grad()
 
                     outputs = self.net(boards)
                     loss = self.loss(outputs, values)
-                    epch_loss += loss.item()
+                    epoch_loss += loss.item()
                     loss.backward()
-                    self.opt.step()
-                epch_loss /= len(data_loader)
-                print('loss: %.6f' %epch_loss)
+                    self.optim.step()
+                epoch_loss /= len(data_loader)
+                print('loss: %.6f' %epoch_loss)
 
             self.net.to(torch.device('cpu'))
             
             if i % 2 == 1:
                 self.test()
 
-            torch.save(self.net.state_dict(), './model1.pth')
+            torch.save({
+                    'net': self.net.state_dict(),
+                    'optim': self.optim.state_dict(),
+                    'round': self.round,
+                    'start_round': i+1,
+                    'game_num': self.game_num,
+                    'epoch': self.epoch
+            }, './model.pth')
 
     def test(self):
         self.net.eval()
