@@ -5,8 +5,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-import torch.multiprocessing as mp
-from multiprocessing.managers import BaseManager
 from tqdm import tqdm
 from reversi import available_pos, set_position
 from data_struct import container
@@ -17,111 +15,9 @@ else:
 torch.manual_seed(1261)
 random.seed(1261)
 # torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = True
-
+# torch.backends.cudnn.benchmark = False
 torch.set_num_interop_threads(2)
 
-@torch.no_grad()
-def self_play(board_dict, net):
-    board, curr = board_dict.get_init_board()
-    round_boards = []
-    while True:
-
-        board_dict.meet(board)
-        round_boards.append(np.copy(board))
-
-        positions = available_pos(board, curr)
-        if len(positions) == 0:
-            curr = -curr
-            positions = available_pos(board, curr)
-
-        if len(positions) == 0:
-            break
-
-        visit_times = []
-        next_boards = np.empty([len(positions), 8, 8])
-        for i, position in enumerate(positions):
-            row, column = position
-            temp_board = np.copy(board)
-            set_position(temp_board, row, column, curr)
-
-            next_boards[i,:,:] = temp_board
-            if board_dict.exist(temp_board):
-                visit_times.append(board_dict.get_value(temp_board)[1])
-            else:
-                visit_times.append(0)
-
-        net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8)
-        net_output = net(net_input)
-        net_output = net_output.view(-1)
-        values = np.asarray(net_output) * curr
-        values = values.tolist()
-
-        sum_visit = sum(visit_times)+1
-        scores = [value + sqrt(log(sum_visit)/(visit+1)) for value, visit in zip(values, visit_times)]
-        index = scores.index(max(scores))
-        set_position(board, positions[index][0], positions[index][1], curr)
-
-        curr = -curr
-
-    white_score = np.count_nonzero(board==1)
-    black_score = np.count_nonzero(board==-1)
-
-    if white_score > black_score:
-        board_dict.round_result(round_boards, 1)
-    elif white_score < black_score:
-        board_dict.round_result(round_boards, -1)
-
-
-
-@torch.no_grad()
-def against_MCTS(scores, net):
-    board = np.zeros([8,8], dtype='int8')
-    board[3][3] = 1
-    board[4][4] = 1
-    board[3][4] = -1
-    board[4][3] = -1
-    curr = 1
-    self_mark = random.choice([1, -1])
-
-    while True:
-        positions = available_pos(board, curr)
-        if len(positions) == 0:
-            curr = -curr
-            positions = available_pos(board, curr)
-
-        if len(positions) == 0:
-            break
-
-        if curr == self_mark:
-
-            next_boards = np.empty([len(positions), 8, 8])
-            for i, position in enumerate(positions):
-                row, column = position
-                temp_board = np.copy(board)
-                set_position(temp_board, row, column, curr)
-                next_boards[i,:,:] = temp_board
-
-            net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8)
-            net_output = net(net_input)
-            net_output = net_output.view(-1)
-            values = np.asarray(net_output) * curr
-            values = values.tolist()
-
-            index = values.index(max(values))
-            set_position(board, positions[index][0], positions[index][1], curr)
-        else:
-            MCT_search(board, curr)
-
-        curr = -curr
-
-    white_score = np.count_nonzero(board==1)
-    black_score = np.count_nonzero(board==-1)
-
-    if white_score > black_score:
-        scores.append(self_mark)
-    elif white_score < black_score:
-        scores.append(-self_mark)
 
 class DealDataset(Dataset):
 
@@ -276,11 +172,7 @@ class model:
         
         scores = []
         for _ in range(10):
-            against_MCTS(scores, self.net)
-                #p.apply(against_MCTS, args=(scores, self.net,))
-
-            # p.close()
-            # p.join()
+            scores.append(self.against_MCTS())
 
         print('test score: %d' %sum(scores))
     
@@ -336,9 +228,60 @@ class model:
         elif white_score < black_score:
             self.board_dict.round_result(round_boards, -1)
 
+    @torch.no_grad()
+    def against_MCTS(self):
+        board = np.zeros([8,8], dtype='int8')
+        board[3][3] = 1
+        board[4][4] = 1
+        board[3][4] = -1
+        board[4][3] = -1
+        curr = 1
+        self_mark = random.choice([1, -1])
+
+        while True:
+            positions = available_pos(board, curr)
+            if len(positions) == 0:
+                curr = -curr
+                positions = available_pos(board, curr)
+
+            if len(positions) == 0:
+                break
+
+            if curr == self_mark:
+
+                next_boards = np.empty([len(positions), 8, 8])
+                for i, position in enumerate(positions):
+                    row, column = position
+                    temp_board = np.copy(board)
+                    set_position(temp_board, row, column, curr)
+                    next_boards[i,:,:] = temp_board
+
+                net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8)
+                net_output = self.net(net_input)
+                net_output = net_output.view(-1)
+                values = np.asarray(net_output) * curr
+                values = values.tolist()
+
+                index = values.index(max(values))
+                set_position(board, positions[index][0], positions[index][1], curr)
+            else:
+                MCT_search(board, curr)
+
+            curr = -curr
+
+        white_score = np.count_nonzero(board==1)
+        black_score = np.count_nonzero(board==-1)
+
+        if white_score > black_score:
+            return self_mark
+        elif white_score < black_score:
+            return -self_mark
+        else:
+            return 0
+
 if __name__ == '__main__':
-    # m = model()
-    # m.train()
+    m = model()
+    m.train()
 
     # m.test()
     # m.s_play()
@@ -368,6 +311,6 @@ if __name__ == '__main__':
 
     # torch.set_num_threads(12)
     # torch.set_num_interop_threads
-    board_dict = container()
-    for _ in tqdm(range(game_num)):
-        self_play(board_dict,net)
+    # board_dict = container()
+    # for _ in tqdm(range(game_num)):
+    #     self_play(board_dict,net)
