@@ -10,25 +10,26 @@ class container:
         board[4][4] = 1
         board[3][4] = -1
         board[4][3] = -1
-        self.dict_list[0][board.tobytes()] = [0, 0]
+        self.dict_list[0][board.tobytes()] = [0, 0, 1]
         self.init_layer = 0
         self.aval_num = 1
-        self.init_list = list(self.dict_list[self.init_layer].keys())
+        self.init_list = [(board.tobytes(), 1)]
         #print(self.dict_list)
 
         #print(len(self.dict_list[0]))
 
     def get_init_board(self):
 
-        bytes_board = random.choice(self.init_list)
+        bytes_board, next = random.choice(self.init_list)
         while self.dict_list[self.init_layer][bytes_board][1] >= 100:
-            bytes_board = random.choice(self.init_list)
+            bytes_board, next = random.choice(self.init_list)
 
         if self.dict_list[self.init_layer][bytes_board][1] == 99:
             self.aval_num -= 1
             if self.aval_num == 0:
                 self.init_layer += 1
-                self.init_list = [ b for b in self.dict_list[self.init_layer].keys() if self.dict_list[self.init_layer][b][1] < 100 ]
+                self.init_list = [ (key, value[2]) for key, value in self.dict_list[self.init_layer].items() 
+                                        if self.dict_list[self.init_layer][key][1] < 100 ]
                 self.aval_num = len(self.init_list)
 
                 if self.aval_num == 0:
@@ -36,22 +37,20 @@ class container:
 
         board = np.frombuffer(bytes_board, dtype='int8').reshape(8,8)
         #print(np.count_nonzero(board))
-        if np.count_nonzero(board) % 2 == 0:
-            curr = 1
-        else:
-            curr = -1
-        return np.copy(board), curr
+
+        return np.copy(board), next
     
-    def meet(self, board):
+    def meet(self, board, next):
 
         num = np.count_nonzero(board)-4
         bytes_board = board.tobytes()
         if bytes_board not in self.dict_list[num]:
 
-            self.dict_list[num][bytes_board] = [0, 1]
+            self.dict_list[num][bytes_board] = [0, 1, next]
 
         else:
-
+            if self.dict_list[num][bytes_board][2] != next:
+                raise RuntimeError('wrong next')
             self.dict_list[num][bytes_board][1] += 1
 
 

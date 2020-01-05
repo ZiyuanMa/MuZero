@@ -214,7 +214,7 @@ class model:
         round_boards = []
         while True:
 
-            self.board_dict.meet(board)
+            self.board_dict.meet(board, curr)
             round_boards.append(np.copy(board))
 
             positions = available_pos(board, curr)
