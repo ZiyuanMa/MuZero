@@ -14,12 +14,12 @@ if torch.cuda.is_available():
     device = torch.device('cuda')
 else:
     device = torch.device('cpu')
-#device = torch.device('cpu')
 torch.manual_seed(1261)
 random.seed(1261)
 # torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = True
 
+torch.set_num_interop_threads(2)
 
 @torch.no_grad()
 def self_play(board_dict, net):
@@ -220,34 +220,17 @@ class model:
         self.loss = nn.MSELoss()
         self.opt = torch.optim.Adam(self.net.parameters())
         self.epch = 4
-        mp.set_start_method('spawn')
 
     def train(self):
-        BaseManager.register('container', container, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
-        manager = BaseManager()
-        manager.start()
 
         for i in range(10):
             self.net.eval()
             
-            board_dict = manager.container()
+            self.board_dict = container()
 
-            game_num = 10000
-            with mp.Pool(2) as p:
-                pbar = tqdm(total=game_num)
-                def update(ret):
-                    pbar.update()
 
-                for _ in range(game_num):
-                    p.apply_async(self_play, args=(board_dict,self.net), callback=update)
-
-                p.close()
-                p.join()
-                pbar.close()
-
-            # board_dict = container()
-            # for _ in range(110):
-            #     self_play(board_dict,self.net)
+            for _ in tqdm(range(10000)):
+                self.self_play()
             
             print(len(board_dict))
 
@@ -290,10 +273,6 @@ class model:
 
     def test(self):
         self.net.eval()
-        # scores = mp.Manager().list()
-        # with mp.Pool(10) as p:
-        torch.set_num_threads(12)
-        print(torch.get_num_threads())
         
         scores = []
         for _ in range(10):
@@ -306,71 +285,68 @@ class model:
         print('test score: %d' %sum(scores))
     
     @torch.no_grad()
-    def s_play(self):
-        self.net.eval()
-        # torch.set_num_threads(8)
-        board_dict = container()
-        for _ in tqdm(range(100)):
-            board, curr = board_dict.get_init_board()
-            round_boards = []
-            while True:
+    def self_play(self):
 
-                board_dict.meet(board)
-                round_boards.append(np.copy(board))
+        board, curr = self.board_dict.get_init_board()
+        round_boards = []
+        while True:
 
-                positions = available_pos(board, curr)
-                if len(positions) == 0:
-                    curr = -curr
-                    positions = available_pos(board, curr)
+            self.board_dict.meet(board)
+            round_boards.append(np.copy(board))
 
-                if len(positions) == 0:
-                    break
-
-                visit_times = []
-                next_boards = np.empty([len(positions), 8, 8])
-                for i, position in enumerate(positions):
-                    row, column = position
-                    temp_board = np.copy(board)
-                    set_position(temp_board, row, column, curr)
-
-                    next_boards[i,:,:] = temp_board
-                    if board_dict.exist(temp_board):
-                        visit_times.append(board_dict.get_value(temp_board)[1])
-                    else:
-                        visit_times.append(0)
-
-                net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8)
-                net_output = self.net(net_input)
-                net_output = net_output.view(-1)
-                values = np.asarray(net_output) * curr
-                values = values.tolist()
-
-                sum_visit = sum(visit_times)+1
-                scores = [value + sqrt(log(sum_visit)/(visit+1)) for value, visit in zip(values, visit_times)]
-                index = scores.index(max(scores))
-                set_position(board, positions[index][0], positions[index][1], curr)
-
+            positions = available_pos(board, curr)
+            if len(positions) == 0:
                 curr = -curr
+                positions = available_pos(board, curr)
 
-            white_score = np.count_nonzero(board==1)
-            black_score = np.count_nonzero(board==-1)
+            if len(positions) == 0:
+                break
 
-            if white_score > black_score:
-                board_dict.round_result(round_boards, 1)
-            elif white_score < black_score:
-                board_dict.round_result(round_boards, -1)
+            visit_times = []
+            next_boards = np.empty([len(positions), 8, 8])
+            for i, position in enumerate(positions):
+                row, column = position
+                temp_board = np.copy(board)
+                set_position(temp_board, row, column, curr)
+
+                next_boards[i,:,:] = temp_board
+                if self.board_dict.exist(temp_board):
+                    visit_times.append(self.board_dict.get_value(temp_board)[1])
+                else:
+                    visit_times.append(0)
+
+            net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8)
+            net_output = self.net(net_input)
+            net_output = net_output.view(-1)
+            values = np.asarray(net_output) * curr
+            values = values.tolist()
+
+            sum_visit = sum(visit_times)+1
+            scores = [value + sqrt(log(sum_visit)/(visit+1)) for value, visit in zip(values, visit_times)]
+            index = scores.index(max(scores))
+            set_position(board, positions[index][0], positions[index][1], curr)
+
+            curr = -curr
+
+        white_score = np.count_nonzero(board==1)
+        black_score = np.count_nonzero(board==-1)
+
+        if white_score > black_score:
+            self.board_dict.round_result(round_boards, 1)
+        elif white_score < black_score:
+            self.board_dict.round_result(round_boards, -1)
 
 if __name__ == '__main__':
-    m = model()
+    # m = model()
     # m.train()
 
     # m.test()
-    m.s_play()
+    # m.s_play()
     # net = CNN()
     # net.eval()
-    # #net.share_memory()
-    # game_num = 100
-
+    # net.share_memory()
+    # game_num = 200
+    # torch.set_num_interop_threads(2)
     # BaseManager.register('container', container, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
     # manager = BaseManager()
     # manager.start()
@@ -391,6 +367,7 @@ if __name__ == '__main__':
     #     pbar.close()
 
     # torch.set_num_threads(12)
-    # board_dict = container()
-    # for _ in tqdm(range(game_num)):
-    #     self_play(board_dict,net)
+    # torch.set_num_interop_threads
+    board_dict = container()
+    for _ in tqdm(range(game_num)):
+        self_play(board_dict,net)
