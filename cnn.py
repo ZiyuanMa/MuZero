@@ -7,6 +7,8 @@ from math import sqrt, log
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+from  multiprocessing.managers import BaseManager
+import multiprocessing as mp
 import numpy as np
 from tqdm import tqdm
 import os
@@ -140,6 +142,71 @@ class model:
 
         return True
 
+    def pre_train(self):
+        print('pre-train start')
+        BaseManager.register('container', container, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
+        manager = BaseManager()
+        manager.start()
+        self.board_dict = manager.container()
+
+
+        with mp.Pool(8) as p:
+            pbar = tqdm(total=20000)
+            def update(ret):
+                pbar.update()
+
+            for _ in range(20000):
+                p.apply_async(self.random_self_play, callback=update)
+
+
+            p.close()
+            p.join()
+            pbar.close()
+        
+        print(len(self.board_dict))
+
+        # for i in board_dict.values():
+        #     if i[1] != 1:
+        #         print(i)
+
+        board_list = self.board_dict.to_list()
+        print(len(board_list))
+
+        data_set = DealDataset(board_list)
+        data_loader = DataLoader(dataset=data_set,
+                        num_workers=4,
+                        pin_memory=True,
+                        batch_size=256,
+                        shuffle=True)
+
+        self.net.to(device)
+        self.net.train()
+        for _ in range(5):
+            epoch_loss = 0
+            for boards, values in data_loader:
+                boards, values = boards.to(device), values.to(device)
+                self.optim.zero_grad()
+
+                outputs = self.net(boards)
+                loss = self.loss(outputs, values)
+                epoch_loss += loss.item()
+                loss.backward()
+                self.optim.step()
+            epoch_loss /= len(data_loader)
+            print('loss: %.6f' %epoch_loss)
+
+        self.net.to(torch.device('cpu'))
+
+        torch.save({
+                    'net': self.net.state_dict(),
+                    'optim': self.optim.state_dict(),
+                    'round': self.round,
+                    'start_round': 0,
+                    'game_num': self.game_num,
+                    'epoch': self.epoch
+            }, './model.pth')
+
+
     def train(self):
 
         for i in range(self.start_round, self.round):
@@ -147,7 +214,6 @@ class model:
             self.net.eval()
             
             self.board_dict = container()
-
 
             for _ in tqdm(range(self.game_num)):
                 self.self_play()
@@ -198,6 +264,7 @@ class model:
                     'epoch': self.epoch
             }, './model.pth')
 
+
     def test(self):
         self.net.eval()
         
@@ -206,6 +273,37 @@ class model:
             scores.append(self.against_MCTS())
 
         print('test score: %d' %sum(scores))
+
+    def random_self_play(self):
+        board, curr = self.board_dict.get_init_board()
+        round_boards = []
+        while True:
+
+            self.board_dict.meet(board, curr)
+            round_boards.append(np.copy(board))
+
+            positions = available_pos(board, curr)
+            if len(positions) == 0:
+                curr = -curr
+                positions = available_pos(board, curr)
+
+            if len(positions) == 0:
+                break
+
+            row, column = random.choice(positions)
+
+            set_position(board, row, column, curr)
+
+            curr = -curr
+
+        white_score = np.count_nonzero(board==1)
+        black_score = np.count_nonzero(board==-1)
+
+        if white_score > black_score:
+            self.board_dict.round_result(round_boards, 1)
+        elif white_score < black_score:
+            self.board_dict.round_result(round_boards, -1)
+
     
     @torch.no_grad()
     def self_play(self):
@@ -312,6 +410,7 @@ class model:
 
 if __name__ == '__main__':
     m = model()
+    m.pre_train()
     m.train()
 
     # m.test()
