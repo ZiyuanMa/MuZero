@@ -20,7 +20,8 @@ torch.manual_seed(1261)
 random.seed(1261)
 # torch.backends.cudnn.deterministic = True
 # torch.backends.cudnn.benchmark = False
-torch.set_num_interop_threads(2)
+# torch.set_num_interop_threads(2)
+# torch.set_num_threads(12)
 
 
 class DealDataset(Dataset):
@@ -155,7 +156,7 @@ class model:
         self.board_dict = manager.Memory()
 
 
-        with mp.Pool(8) as p:
+        with mp.Pool(12) as p:
             pbar = tqdm(total=50000)
             def update(ret):
                 pbar.update()
@@ -174,7 +175,7 @@ class model:
         #     if i[1] != 1:
         #         print(i)
 
-        board_list = self.board_dict.to_list(min=3)
+        board_list = self.board_dict.to_list(min=4)
         print(len(board_list))
 
         data_set = DealDataset(board_list)
@@ -221,10 +222,30 @@ class model:
             print('round ' + str(i+1) + ' start')
             self.net.eval()
             
-            self.board_dict = Memory()
+            # self.board_dict = Memory()
 
-            for _ in tqdm(range(self.game_num)):
-                self.self_play()
+            # for _ in tqdm(range(self.game_num)):
+            #     self.self_play()
+
+            BaseManager.register('Memory', Memory, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
+            manager = BaseManager()
+            manager.start()
+            self.board_dict = manager.Memory()
+
+
+            with mp.Pool(2) as p:
+                pbar = tqdm(total=game_num)
+                def update(ret):
+                    pbar.update()
+
+                for _ in range(game_num):
+                    p.apply_async(self.self_play, callback=update)
+
+
+                p.close()
+                p.join()
+                pbar.close()
+
             
             print(len(self.board_dict))
 
