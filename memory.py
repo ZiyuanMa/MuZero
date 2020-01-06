@@ -66,8 +66,8 @@ class Memory:
         l = []
         for d in self.dict_list:
             for key, value in d.items():
-                if value[1] >= 2:
-                    l.append((np.frombuffer(key[0], dtype='int8').reshape(8,8), key[1], value[0]/value[1]))
+                if value[1] >= min:
+                    l.append(np.concatenate((np.frombuffer(key[0], dtype='int8').reshape(8,8), key[1]*np.ones((8, 8))), value[0]/value[1]))
 
         return l
 
@@ -94,10 +94,10 @@ class Memory:
 
     def round_result(self, round_boards, result):
 
-        for board in round_boards:
+        for board, next in round_boards:
             num = np.count_nonzero(board)-4
             bytes_board = board.tobytes()
-            self.dict_list[num][bytes_board][0] += result
+            self.dict_list[num][(bytes_board, next)][0] += result
 
             
 

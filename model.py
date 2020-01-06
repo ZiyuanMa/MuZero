@@ -42,7 +42,7 @@ class DealDataset(Dataset):
     def transform(self, narray):
         if random.choice([True, False]):
             
-            return torch.from_numpy(np.rot90(narray, 2).copy()).float().view(1,8,8)
+            return torch.from_numpy(np.rot90(narray, 2).copy()).float().view(2,8,8)
         else:
             return torch.from_numpy(narray).float().view(1,8,8)
 
@@ -52,7 +52,7 @@ class CNN(nn.Module):
 
         # 8x8 input 6x6 output
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=1,
+            nn.Conv2d(in_channels=2,
                             out_channels=256,
                             kernel_size=3,
                             stride=1,
@@ -319,36 +319,54 @@ class model:
         round_boards = []
         while True:
 
-            self.board_dict.meet(board, next)
-            round_boards.append(np.copy(board))
-
             positions = available_pos(board, next)
             if len(positions) == 0:
                 next = -next
                 positions = available_pos(board, next)
 
-            if len(positions) == 0:
-                break
+                if len(positions) == 0:
+                    self.board_dict.meet(board, 0)
+                    round_boards.append((np.copy(board), 0))
+                    break
+                else:
+                    self.board_dict.meet(board, next)
+                    round_boards.append((np.copy(board), next))
+            else:
+                self.board_dict.meet(board, next)
+                round_boards.append((np.copy(board), next))
 
-            visit_times = []
-            next_boards = np.empty([len(positions), 8, 8])
+
+            # visit_times = []
+            next_boards = np.empty([len(positions), 2, 8, 8])
             for i, position in enumerate(positions):
                 row, column = position
                 temp_board = np.copy(board)
                 set_position(temp_board, row, column, next)
 
-                next_boards[i,:,:] = temp_board
-                if self.board_dict.exist(temp_board):
-                    visit_times.append(self.board_dict.get_value(temp_board)[1])
-                else:
-                    visit_times.append(0)
+                temp_next = -next
+                temp_pos = available_pos(temp_board, temp_next)
+                if len(temp_pos) == 0:
+                    temp_next = -temp_next
+                    temp_pos = available_pos(temp_board, temp_next)
 
-            net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8)
+                    if len(temp_pos) == 0:
+                        temp_next = 0
+
+
+
+                next_boards[i,0,:,:] = temp_board
+                next_boards[i,1,:,:] = np.ones((8,8))*temp_next
+                # if self.board_dict.exist(temp_board):
+                #     visit_times.append(self.board_dict.get_value(temp_board)[1])
+                # else:
+                #     visit_times.append(0)
+
+            net_input = torch.from_numpy(next_boards).float().view(-1,2,8,8)
             net_output = self.net(net_input)
             net_output = net_output.view(-1)* next
             # values = np.asarray(net_output)
             # values = values.tolist()
-            if chess_piece <= 36:
+            if chess_piece <= 32:
 
                 prob = np.asarray(torch.softmax(net_output, dim=0))
                 index = np.random.choice(range(len(prob)), p = prob)
@@ -425,7 +443,7 @@ class model:
 
 if __name__ == '__main__':
     m = model()
-    m.train()
+    m.train(False)
 
     # m.test()
     # m.s_play()
