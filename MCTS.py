@@ -45,9 +45,9 @@ def MCT_search(board, mark):
 
 
         score = mp.Manager().list()
-        with mp.Pool(12) as p:
+        with mp.Pool(10) as p:
             
-            for _ in range(500):
+            for _ in range(200):
                 p.apply_async(self_play, args=(temp_board, mark, score))
 
             p.close()
