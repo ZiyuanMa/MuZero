@@ -136,6 +136,7 @@ class model:
         if checkpoint['game_num'] != game_num or checkpoint['epoch'] != epoch or checkpoint['round'] != round:
             return False
 
+        print('load model, continue training')
         self.net.load_state_dict(checkpoint['net'])
         self.optim.load_state_dict(checkpoint['optim'])
         self.round = checkpoint['round']
@@ -313,18 +314,18 @@ class model:
     @torch.no_grad()
     def self_play(self):
 
-        board, curr = self.board_dict.get_init_board()
+        board, next = self.board_dict.get_init_board()
         chess_piece = np.count_nonzero(board)
         round_boards = []
         while True:
 
-            self.board_dict.meet(board, curr)
+            self.board_dict.meet(board, next)
             round_boards.append(np.copy(board))
 
-            positions = available_pos(board, curr)
+            positions = available_pos(board, next)
             if len(positions) == 0:
-                curr = -curr
-                positions = available_pos(board, curr)
+                next = -next
+                positions = available_pos(board, next)
 
             if len(positions) == 0:
                 break
@@ -334,7 +335,7 @@ class model:
             for i, position in enumerate(positions):
                 row, column = position
                 temp_board = np.copy(board)
-                set_position(temp_board, row, column, curr)
+                set_position(temp_board, row, column, next)
 
                 next_boards[i,:,:] = temp_board
                 if self.board_dict.exist(temp_board):
@@ -344,7 +345,7 @@ class model:
 
             net_input = torch.from_numpy(next_boards).float().view(-1,1,8,8)
             net_output = self.net(net_input)
-            net_output = net_output.view(-1)* curr
+            net_output = net_output.view(-1)* next
             # values = np.asarray(net_output)
             # values = values.tolist()
             if chess_piece <= 36:
@@ -358,10 +359,10 @@ class model:
                 _, index = torch.max(net_output, 0)
                 index = index.item()
                 
-            set_position(board, positions[index][0], positions[index][1], curr)
+            set_position(board, positions[index][0], positions[index][1], next)
             chess_piece += 1
 
-            curr = -curr
+            next = -next
 
         white_score = np.count_nonzero(board==1)
         black_score = np.count_nonzero(board==-1)

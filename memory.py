@@ -48,6 +48,9 @@ class Memory:
 
         else:
             if self.dict_list[num][bytes_board][2] != next:
+                print(board)
+                print('input next: '+str(next))
+                print('stored next: '+str(self.dict_list[num][bytes_board][2]))
                 raise RuntimeError('wrong next')
             self.dict_list[num][bytes_board][1] += 1
 
