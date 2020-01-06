@@ -120,7 +120,7 @@ class model:
     def __init__(self):
         self.net = CNN()
         self.loss = nn.MSELoss()
-        self.optim = torch.optim.SGD(self.net.parameters(), lr=0.005, momentum=0.9, weight_decay=0.0001)
+        self.optim = torch.optim.SGD(self.net.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0001)
 
         if not self.load():
             self.round = round
@@ -216,7 +216,7 @@ class model:
         if pre_train:
             self.pre_train()
 
-        self.optim.param_groups[0]["lr"]=0.001
+
         for i in range(self.start_round, self.round):
             print('round ' + str(i+1) + ' start')
             self.net.eval()
@@ -269,6 +269,7 @@ class model:
                     'game_num': self.game_num,
                     'epoch': self.epoch
             }, './model.pth')
+            self.optim.param_groups[0]["lr"]/=2
         self.test()
 
     def test(self):
