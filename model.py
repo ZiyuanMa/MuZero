@@ -425,7 +425,7 @@ class model:
 
 if __name__ == '__main__':
     m = model()
-    m.train(True)
+    m.train()
 
     # m.test()
     # m.s_play()
