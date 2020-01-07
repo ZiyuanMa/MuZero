@@ -1,5 +1,5 @@
 from MCTS import MCT_search
-from parameters import *
+import config
 from reversi import available_pos, set_position
 from memory import Memory
 import random
@@ -118,104 +118,36 @@ class CNN(nn.Module):
 
 
 class model:
+
     def __init__(self):
         self.net = CNN()
         self.loss = nn.MSELoss()
         self.optim = torch.optim.SGD(self.net.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0001)
-
+        self.round = config.round
         if not self.load():
-            self.round = round
             self.start_round = 0
-            self.game_num = game_num
-            self.epoch = epoch
+            self.episodes = config.episodes
+            self.epoch = config.epoch
 
     def load(self):
         if not os.path.exists('./model.pth'):
             return False
 
         checkpoint = torch.load('./model.pth')
-        if checkpoint['game_num'] != game_num or checkpoint['epoch'] != epoch or checkpoint['round'] != round:
+        if checkpoint['episodes'] != config.episodes or checkpoint['epoch'] != config.epoch:
             return False
 
         print('load model, continue training')
         self.net.load_state_dict(checkpoint['net'])
         self.optim.load_state_dict(checkpoint['optim'])
-        self.round = checkpoint['round']
         self.start_round = checkpoint['start_round']
-        self.game_num = checkpoint['game_num']
+        self.episodes = checkpoint['episodes']
         self.epoch = checkpoint['epoch']
 
         return True
 
-    def pre_train(self):
-        print('pre-train start')
-        self.optim.param_groups[0]["lr"]=0.01
-        BaseManager.register('Memory', Memory, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
-        manager = BaseManager()
-        manager.start()
-        self.board_dict = manager.Memory()
 
-
-        with mp.Pool(12) as p:
-            pbar = tqdm(total=50000)
-            def update(ret):
-                pbar.update()
-
-            for _ in range(50000):
-                p.apply_async(self.random_self_play, callback=update)
-
-
-            p.close()
-            p.join()
-            pbar.close()
-        
-        print(len(self.board_dict))
-
-        # for i in board_dict.values():
-        #     if i[1] != 1:
-        #         print(i)
-
-        board_list = self.board_dict.to_list(min=4)
-        print(len(board_list))
-
-        data_set = DealDataset(board_list)
-        data_loader = DataLoader(dataset=data_set,
-                        num_workers=4,
-                        pin_memory=True,
-                        batch_size=256,
-                        shuffle=True)
-
-        self.net.to(device)
-        self.net.train()
-        for _ in range(10):
-            epoch_loss = 0
-            for boards, values in data_loader:
-                boards, values = boards.to(device), values.to(device)
-                self.optim.zero_grad()
-
-                outputs = self.net(boards)
-                loss = self.loss(outputs, values)
-                epoch_loss += loss.item()
-                loss.backward()
-                self.optim.step()
-            epoch_loss /= len(data_loader)
-            print('loss: %.6f' %epoch_loss)
-
-        self.net.to(torch.device('cpu'))
-
-        torch.save({
-                    'net': self.net.state_dict(),
-                    'optim': self.optim.state_dict(),
-                    'round': self.round,
-                    'start_round': 0,
-                    'game_num': self.game_num,
-                    'epoch': self.epoch
-            }, './model.pth')
-
-
-    def train(self, pre_train=False):
-        if pre_train:
-            self.pre_train()
+    def train(self):
 
 
         for i in range(self.start_round, self.round):
@@ -234,11 +166,11 @@ class model:
 
 
             with mp.Pool(2) as p:
-                pbar = tqdm(total=game_num)
+                pbar = tqdm(total=config.episodes)
                 def update(ret):
                     pbar.update()
 
-                for _ in range(game_num):
+                for _ in range(config.episodes):
                     p.apply_async(self.self_play, callback=update)
 
 
@@ -285,9 +217,8 @@ class model:
             torch.save({
                     'net': self.net.state_dict(),
                     'optim': self.optim.state_dict(),
-                    'round': self.round,
                     'start_round': i+1,
-                    'game_num': self.game_num,
+                    'episodes': self.episodes,
                     'epoch': self.epoch
             }, './model.pth')
             self.optim.param_groups[0]["lr"]/=2
@@ -302,41 +233,16 @@ class model:
 
         print('test score: %d' %sum(scores))
 
-    def random_self_play(self):
-        board, curr = self.board_dict.get_init_board()
-        round_boards = []
-        while True:
-
-            self.board_dict.meet(board, curr)
-            round_boards.append(np.copy(board))
-
-            positions = available_pos(board, curr)
-            if len(positions) == 0:
-                curr = -curr
-                positions = available_pos(board, curr)
-
-            if len(positions) == 0:
-                break
-
-            row, column = random.choice(positions)
-
-            set_position(board, row, column, curr)
-
-            curr = -curr
-
-        white_score = np.count_nonzero(board==1)
-        black_score = np.count_nonzero(board==-1)
-
-        if white_score > black_score:
-            self.board_dict.round_result(round_boards, 1)
-        elif white_score < black_score:
-            self.board_dict.round_result(round_boards, -1)
-
     
     @torch.no_grad()
     def self_play(self):
 
-        board, next = self.board_dict.get_init_board()
+        board = np.zeros([8,8])
+        board[3][3] = 1
+        board[4][4] = 1
+        board[3][4] = -1
+        board[4][3] = -1
+        next = 1
         chess_piece = np.count_nonzero(board)
         round_boards = []
         while True:

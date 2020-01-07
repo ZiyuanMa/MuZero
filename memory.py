@@ -1,113 +1,114 @@
+import config
 import numpy as np
 import random
+import math
 
-class Memory:
-    def __init__(self):
-        self.dict_list = [dict() for _ in range(61)]
+class Board:
+    def __init__(self, round_info: list):
+        round_info = round_info.copy()
+        round_info[0] = round_info[0]/round_info[1]
+        round_info.append(config.memory_size)
+        self.info_list = [round_info]
+        self.visit_times = round_info[1]
 
-        board = np.zeros([8,8], dtype='int8')
-        board[3][3] = 1
-        board[4][4] = 1
-        board[3][4] = -1
-        board[4][3] = -1
-        self.dict_list[0][(board.tobytes(), 1)] = [0, 0]
-        self.init_layer = 0
-        self.init_list = [(board.tobytes(), 1)]
-        #print(self.dict_list)
+    def update(self, round_info=None):
 
-        #print(len(self.dict_list[0]))
+        if self.info_list[0][2] == 1:
+            self.visit_times -= self.info_list[0][1]
+            del self.info_list[0]
 
-    def get_init_board(self):
-        if len(self.init_list) == 0:
-            raise RuntimeError('no board in init list')
+        for info in self.info_list:
+            info[2] -= 1
 
-        bytes_board, next = random.choice(self.init_list)
-
-        if self.dict_list[self.init_layer][(bytes_board, next)][1] == 99:
-            self.init_list.remove((bytes_board, next))
-            if len(self.init_list) == 0:
-                self.init_layer += 1
-                self.init_list = [ key for key, value in self.dict_list[self.init_layer].items() 
-                                        if self.dict_list[self.init_layer][key][1] < 100 ]
-
-                if len(self.init_list) == 0:
-                    raise RuntimeError('no avaliable board')
-
-        board = np.frombuffer(bytes_board, dtype='int8').reshape(8,8)
-        #print(np.count_nonzero(board))
-
-        return np.copy(board), next
-    
-    def meet(self, board, next):
-
-        num = np.count_nonzero(board)-4
-        bytes_board = board.tobytes()
-        if (bytes_board, next) not in self.dict_list[num]:
-
-            self.dict_list[num][(bytes_board, next)] = [0, 1, next]
-
-        else:
-            # if self.dict_list[num][bytes_board][2] != next:
-            #     print(board)
-            #     print('input next: '+str(next))
-            #     print('stored next: '+str(self.dict_list[num][bytes_board][2]))
-            #     raise RuntimeError('wrong next')
-            self.dict_list[num][(bytes_board, next)][1] += 1
+        if round_info:
+            self.info_list.append(round_info+[config.memory_size])
+            self.visit_times += round_info[1]
 
 
     def __len__(self):
-        length = 0
-        for d in self.dict_list:
-            length += len(d)
+        return len(self.info_list)
 
-        return length
+    def get_value(self):
+        size = len(self.info_list)
+        value = self.info_list[0][0]
+        if size == 1:
+            return value
+
+        else:
+            for info in self.info_list[1:]:
+                value = value * (1-config.update_rate) + info[0] * config.update_rate
+            return value
+
+
+class Memory:
+    def __init__(self):
+        self.storage = dict()
+        self.buffer = dict()
+        #print(self.storage)
+
+        #print(len(self.storage[0]))
+    
+    def meet(self, board, next):
+
+        bytes_board = board.tobytes()
+        if (bytes_board, next) not in self.buffer:
+
+            self.buffer[(bytes_board, next)] = [0, 1]
+
+        else:
+
+            self.buffer[(bytes_board, next)][1] += 1
+
+
+    def __len__(self):
+
+        return len(self.storage)
 
     def to_list(self, min=2):
         l = []
-        for d in self.dict_list:
-            for key, value in d.items():
-                if value[1] >= min:
-                    l.append(np.concatenate((np.frombuffer(key[0], dtype='int8').reshape(8,8), key[1]*np.ones((8, 8))), value[0]/value[1]))
-
+        for key, value in self.storage.items():
+            if value.visit_times >= config.min_visit_times or key[1]==0:
+                l.append(np.concatenate((np.frombuffer(key[0], dtype='int8').reshape(8,8), key[1]*np.ones((8, 8))), value[0]/value[1]))
+            
         return l
 
-    def __str__(self):
-        string = ''
-        for i, d in enumerate(self.dict_list):
-            if len(d) != 0 and i < 4:
-                string += 'layer ' + str(i+1) + ':\n'
-                for _, value in d.items():
-                    #board = np.frombuffer(key, dtype='double').reshape(8,8)
-                    #string += board.__str__()
-                    string += '\t' + str(value[0]) + '  ' + str(value[1]) + '\n'
+    # def __str__(self):
+    #     string = ''
+    #     for i, d in enumerate(self.storage):
+    #         if len(d) != 0 and i < 4:
+    #             string += 'layer ' + str(i+1) + ':\n'
+    #             for _, value in d.items():
+    #                 #board = np.frombuffer(key, dtype='double').reshape(8,8)
+    #                 #string += board.__str__()
+    #                 string += '\t' + str(value[0]) + '  ' + str(value[1]) + '\n'
 
-        return string
+    #     return string
 
-        
-    def exist(self, board):
-        num = np.count_nonzero(board)-4
-        bytes_board = board.tobytes()
-        if bytes_board in self.dict_list[num]:
-            return True
-        else:
-            return  False
 
     def round_result(self, round_boards, result):
 
         for board, next in round_boards:
-            num = np.count_nonzero(board)-4
             bytes_board = board.tobytes()
-            self.dict_list[num][(bytes_board, next)][0] += result
+            self.buffer[(bytes_board, next)][0] += result
 
-            
 
-    def get_value(self, board):
-        num = np.count_nonzero(board)-4
-        bytes_board = board.tobytes()
-        if bytes_board not in self.dict_list[num]:
-            raise RuntimeError('this board D.N.E.')
+    def buffer_to_storage(self):
+        # update storage
+        for key, value in self.storage.items():
+            if key in self.buffer:
+                value.update(self.buffer[key])
+                del self.buffer[key]
+            else:
+                value.update()
+                if len(value) == 0:
+                    del self.storage[key]
         
-        return self.dict_list[num][bytes_board]
+        # write new board in buffer to storage
+        for key, value in self.buffer.items():
+            self.storage[key] = Board(value)
+        
+        self.buffer.clear()
+
 
 if __name__ == '__main__':
     m = Memory()
