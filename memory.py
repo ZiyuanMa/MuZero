@@ -102,23 +102,22 @@ class Memory:
             self.buffer[(bytes_board, next)][0] += result
 
 
-    def buffer_to_storage(self):
+    def buffer_to_storage(self, buffer):
         # update storage
         for key, value in self.storage.items():
-            if key in self.buffer:
+            if key in buffer:
                 value.update(self.buffer[key])
-                del self.buffer[key]
+                del buffer[key]
             else:
                 value.update()
                 if len(value) == 0:
                     del self.storage[key]
         
         # write new board in buffer to storage
-        for key, value in self.buffer.items():
+        for key, value in buffer.items():
             np.frombuffer(key[0]).reshape(8,8)
             self.storage[key] = Board(value)
         
-        self.buffer.clear()
 
 
 if __name__ == '__main__':

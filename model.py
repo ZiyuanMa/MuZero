@@ -28,7 +28,7 @@ random.seed(1261)
 # torch.set_num_threads(12)
 
 @torch.no_grad()
-def self_play(net, board_dict):
+def self_play(net, buffer):
 
     board = np.zeros([8,8])
     board[3][3] = 1
@@ -39,22 +39,37 @@ def self_play(net, board_dict):
     chess_piece = np.count_nonzero(board)
     round_boards = []
     while True:
-
+        bytes_board = board.tobytes()
         positions = available_pos(board, next)
         if len(positions) == 0:
             next = -next
             positions = available_pos(board, next)
 
             if len(positions) == 0:
-                board_dict.meet(board, 0)
-                round_boards.append((np.copy(board), 0))
+
+                if (bytes_board, 0) not in buffer:
+                    buffer[(bytes_board, 0)] = [0, 1]
+                else:
+                    buffer[(bytes_board, 0)][1] += 1
+
+                round_boards.append((bytes_board, 0))
                 break
             else:
-                board_dict.meet(board, next)
-                round_boards.append((np.copy(board), next))
+                # with lock:
+                if (bytes_board, next) not in buffer:
+                    buffer[(bytes_board, next)] = [0, 1]
+                else:
+                    buffer[(bytes_board, next)][1] += 1
+
+                round_boards.append((bytes_board, next))
         else:
-            board_dict.meet(board, next)
-            round_boards.append((np.copy(board), next))
+            # with lock:
+            if (bytes_board, next) not in buffer:
+                buffer[(bytes_board, next)] = [0, 1]
+            else:
+                buffer[(bytes_board, next)][1] += 1
+
+            round_boards.append((bytes_board, next))
 
 
         # visit_times = []
@@ -107,9 +122,15 @@ def self_play(net, board_dict):
     black_score = np.count_nonzero(board==-1)
 
     if white_score > black_score:
-        board_dict.round_result(round_boards, 1)
+
+        for key in round_boards:
+            buffer[key][0] += 1
+
     elif white_score < black_score:
-        board_dict.round_result(round_boards, -1)
+
+        for key in round_boards:
+            buffer[key][0] -= 1
+
 class DealDataset(Dataset):
 
     def __init__(self, data):
@@ -214,7 +235,7 @@ class model:
             self.start_round = 0
             self.episodes = config.episodes
             self.epoch = config.epoch
-            self.board_dict = manager.Memory()
+            self.board_dict = Memory()
 
     def load(self):
         if not os.path.exists('./model.pth') or os.path.exists('./memory.pth'):
@@ -240,6 +261,7 @@ class model:
 
     def train(self):
 
+        self.board_dict = Memory()
 
         for i in range(self.start_round, self.round):
             print('round ' + str(i+1) + ' start')
@@ -247,28 +269,31 @@ class model:
             
             # self.board_dict = Memory()
 
-            for _ in tqdm(range(config.episodes)):
-                self_play(self.net, self.board_dict)
+            # for _ in tqdm(range(config.episodes)):
+            #     self_play(self.net, self.board_dict)
+            buffer = mp.Manager().dict()
+            with mp.Pool(3) as p:
+
+                for _ in tqdm(range(config.episodes)):
+                    p.apply(self_play, args=(self.net, buffer))
 
 
-            # with mp.Pool(2) as p:
+
+            # with mp.Pool(2,initializer=init) as p:
             #     pbar = tqdm(total=config.episodes)
             #     def update(ret):
             #         pbar.update()
 
             #     for _ in range(config.episodes):
-            #         p.apply_async(self_play, args=(self.net, self.board_dict), callback=update)
+            #         p.apply(self_play, args=(self.net, self.board_dict))
 
 
-            #     p.close()
-            #     p.join()
+            #     # p.close()
+            #     # p.join()
             #     pbar.close()
 
-            self.board_dict.buffer_to_storage()
+            self.board_dict.buffer_to_storage(buffer)
             print(len(self.board_dict))
-            with open('./memory.pth', 'wb') as pickle_file:
-
-                pickle.dump(self.board_dict, pickle_file)
 
             # for i in board_dict.values():
             #     if i[1] != 1:
@@ -276,6 +301,9 @@ class model:
 
             board_list = self.board_dict.to_list()
             print(len(board_list))
+            # with open('./memory.pth', 'wb') as pickle_file:
+
+            #     pickle.dump(self.board_dict, pickle_file)
 
             data_set = DealDataset(board_list)
             data_loader = DataLoader(dataset=data_set,
