@@ -70,6 +70,7 @@ class Memory:
             if value.visit_times >= config.min_visit_times or key[1]==0:
 
                 keys.append(key)
+
         if len(keys) > config.batch_size:
             keys = random.sample(keys, config.batch_size)
         # for board, next in keys:
@@ -106,8 +107,8 @@ class Memory:
         # update storage
         for key, value in self.storage.items():
             if key in buffer:
-                value.update(self.buffer[key])
-                del buffer[key]
+                value.update(buffer[key].copy())
+                # del buffer[key]
             else:
                 value.update()
                 if len(value) == 0:

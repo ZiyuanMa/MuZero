@@ -7,11 +7,7 @@ from math import sqrt, log
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from  multiprocessing.managers import BaseManager
-BaseManager.register('Memory', Memory, exposed=[ 'meet', '__len__', 'to_list', 'buffer_to_storage', 'round_result'])
-manager = BaseManager()
-manager.start()
-import multiprocessing as mp
+import torch.multiprocessing as mp
 import numpy as np
 from tqdm import tqdm
 import pickle
@@ -50,24 +46,29 @@ def self_play(net, buffer):
                 if (bytes_board, 0) not in buffer:
                     buffer[(bytes_board, 0)] = [0, 1]
                 else:
-                    buffer[(bytes_board, 0)][1] += 1
-
+                    tmp = buffer[(bytes_board, 0)]
+                    tmp[1] += 1
+                    buffer[(bytes_board, 0)] = tmp
                 round_boards.append((bytes_board, 0))
                 break
             else:
-                # with lock:
+
                 if (bytes_board, next) not in buffer:
                     buffer[(bytes_board, next)] = [0, 1]
                 else:
-                    buffer[(bytes_board, next)][1] += 1
+                    tmp = buffer[(bytes_board, next)]
+                    tmp[1] += 1
+                    buffer[(bytes_board, next)] = tmp
 
                 round_boards.append((bytes_board, next))
         else:
-            # with lock:
+
             if (bytes_board, next) not in buffer:
                 buffer[(bytes_board, next)] = [0, 1]
             else:
-                buffer[(bytes_board, next)][1] += 1
+                tmp = buffer[(bytes_board, next)]
+                tmp[1] += 1
+                buffer[(bytes_board, next)] = tmp
 
             round_boards.append((bytes_board, next))
 
@@ -124,12 +125,18 @@ def self_play(net, buffer):
     if white_score > black_score:
 
         for key in round_boards:
-            buffer[key][0] += 1
+            tmp = buffer[key]
+            tmp[0] += 1
+            buffer[key] = tmp
+
 
     elif white_score < black_score:
 
         for key in round_boards:
-            buffer[key][0] -= 1
+            tmp = buffer[key]
+            tmp[0] -= 1
+            buffer[key] = tmp
+
 
 class DealDataset(Dataset):
 
@@ -228,6 +235,7 @@ class model:
 
     def __init__(self):
         self.net = CNN()
+        self.net.share_memory()
         self.loss = nn.MSELoss()
         self.optim = torch.optim.SGD(self.net.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0001)
         self.round = config.round
@@ -272,27 +280,29 @@ class model:
             # for _ in tqdm(range(config.episodes)):
             #     self_play(self.net, self.board_dict)
             buffer = mp.Manager().dict()
-            with mp.Pool(3) as p:
 
-                for _ in tqdm(range(config.episodes)):
-                    p.apply(self_play, args=(self.net, buffer))
-
-
-
-            # with mp.Pool(2,initializer=init) as p:
-            #     pbar = tqdm(total=config.episodes)
-            #     def update(ret):
-            #         pbar.update()
-
-            #     for _ in range(config.episodes):
-            #         p.apply(self_play, args=(self.net, self.board_dict))
+            # with mp.Pool(2) as p:
+            #     for _ in tqdm(range(config.episodes)):
+            #         p.apply(self_play, args=(self.net, buffer))
 
 
-            #     # p.close()
-            #     # p.join()
-            #     pbar.close()
 
+            with mp.Pool(2) as p:
+                pbar = tqdm(total=config.episodes)
+                def update(ret):
+                    pbar.update()
+
+                for _ in range(config.episodes):
+                    p.apply_async(self_play, args=(self.net, buffer), callback= update)
+
+
+                p.close()
+                p.join()
+                pbar.close()
+
+            # buffer = buffer.copy()
             self.board_dict.buffer_to_storage(buffer)
+            # del buffer
             print(len(self.board_dict))
 
             # for i in board_dict.values():
@@ -301,9 +311,9 @@ class model:
 
             board_list = self.board_dict.to_list()
             print(len(board_list))
-            # with open('./memory.pth', 'wb') as pickle_file:
+            # # with open('./memory.pth', 'wb') as pickle_file:
 
-            #     pickle.dump(self.board_dict, pickle_file)
+            # #     pickle.dump(self.board_dict, pickle_file)
 
             data_set = DealDataset(board_list)
             data_loader = DataLoader(dataset=data_set,
@@ -312,7 +322,7 @@ class model:
                             batch_size=256,
                             shuffle=True)
 
-            self.net.to(device)
+            # self.net.to(device)
             self.net.train()
             for _ in range(self.epoch):
                 epoch_loss = 0
@@ -328,16 +338,16 @@ class model:
                 epoch_loss /= len(data_loader)
                 print('loss: %.6f' %epoch_loss)
 
-            self.net.to(torch.device('cpu'))
+            # self.net.to(torch.device('cpu'))
             
 
-            torch.save({
-                    'net': self.net.state_dict(),
-                    'optim': self.optim.state_dict(),
-                    'start_round': i+1,
-                    'episodes': self.episodes,
-                    'epoch': self.epoch
-            }, './model.pth')
+            # torch.save({
+            #         'net': self.net.state_dict(),
+            #         'optim': self.optim.state_dict(),
+            #         'start_round': i+1,
+            #         'episodes': self.episodes,
+            #         'epoch': self.epoch
+            # }, './model.pth')
             # self.optim.param_groups[0]["lr"]/=2
         self.test()
 
@@ -350,90 +360,6 @@ class model:
 
         print('test score: %d' %sum(scores))
 
-    
-    @torch.no_grad()
-    def self_play(self):
-
-        board = np.zeros([8,8])
-        board[3][3] = 1
-        board[4][4] = 1
-        board[3][4] = -1
-        board[4][3] = -1
-        next = 1
-        chess_piece = np.count_nonzero(board)
-        round_boards = []
-        while True:
-
-            positions = available_pos(board, next)
-            if len(positions) == 0:
-                next = -next
-                positions = available_pos(board, next)
-
-                if len(positions) == 0:
-                    self.board_dict.meet(board, 0)
-                    round_boards.append((np.copy(board), 0))
-                    break
-                else:
-                    self.board_dict.meet(board, next)
-                    round_boards.append((np.copy(board), next))
-            else:
-                self.board_dict.meet(board, next)
-                round_boards.append((np.copy(board), next))
-
-
-            # visit_times = []
-            next_boards = np.empty([len(positions), 2, 8, 8])
-            for i, position in enumerate(positions):
-                row, column = position
-                temp_board = np.copy(board)
-                set_position(temp_board, row, column, next)
-
-                temp_next = -next
-                temp_pos = available_pos(temp_board, temp_next)
-                if len(temp_pos) == 0:
-                    temp_next = -temp_next
-                    temp_pos = available_pos(temp_board, temp_next)
-
-                    if len(temp_pos) == 0:
-                        temp_next = 0
-
-
-
-                next_boards[i,0,:,:] = temp_board
-                next_boards[i,1,:,:] = np.ones((8,8))*temp_next
-                # if self.board_dict.exist(temp_board):
-                #     visit_times.append(self.board_dict.get_value(temp_board)[1])
-                # else:
-                #     visit_times.append(0)
-
-            net_input = torch.from_numpy(next_boards).float().view(-1,2,8,8)
-            net_output = self.net(net_input)
-            net_output = net_output.view(-1)* next
-            # values = np.asarray(net_output)
-            # values = values.tolist()
-            if chess_piece <= 32:
-
-                prob = np.asarray(torch.softmax(net_output, dim=0))
-                index = np.random.choice(range(len(prob)), p = prob)
-                # sum_visit = sum(visit_times)+1
-                # scores = [value + sqrt(log(sum_visit)/(visit+1)) for value, visit in zip(values, visit_times)]
-                # index = scores.index(max(scores))
-            else:
-                _, index = torch.max(net_output, 0)
-                index = index.item()
-                
-            set_position(board, positions[index][0], positions[index][1], next)
-            chess_piece += 1
-
-            next = -next
-
-        white_score = np.count_nonzero(board==1)
-        black_score = np.count_nonzero(board==-1)
-
-        if white_score > black_score:
-            self.board_dict.round_result(round_boards, 1)
-        elif white_score < black_score:
-            self.board_dict.round_result(round_boards, -1)
 
     @torch.no_grad()
     def against_MCTS(self):
@@ -487,35 +413,80 @@ class model:
             return 0
 
 if __name__ == '__main__':
+    mp.set_start_method('spawn')
     m = model()
     m.train()
 
     # m.test()
     # m.s_play()
+    # board_dict = Memory()
     # net = CNN()
     # net.eval()
     # net.share_memory()
-    # game_num = 200
-    # torch.set_num_interop_threads(2)
-    # BaseManager.register('Memory', Memory, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
-    # manager = BaseManager()
-    # manager.start()
-    # board_dict = manager.Memory()
+    # loss = nn.MSELoss()
+    # optim = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0001)
+    # # game_num = 200
+    # # torch.set_num_interop_threads(2)
+    # # BaseManager.register('Memory', Memory, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
+    # # manager = BaseManager()
+    # # manager.start()
+    # # board_dict = manager.Memory()
 
+    # for _ in range(2):
+    #     buffer = mp.Manager().dict()
 
-    # with mp.Pool(2) as p:
-    #     pbar = tqdm(total=game_num)
+    #             # with mp.Pool(2) as p:
+    #             #     for _ in tqdm(range(config.episodes)):
+    #             #         p.apply(self_play, args=(self.net, buffer)
+    #     pbar = tqdm(total=100)
     #     def update(ret):
-    #         pbar.update()
+    #             pbar.update()
+    #     with mp.Pool(2) as p:
 
-    #     for _ in range(game_num):
-    #         p.apply_async(self_play, args=(board_dict,net), callback=update)
+    #         for _ in range(100):
+    #             p.apply_async(self_play, args=(net, buffer), callback= update)
 
 
-    #     p.close()
-    #     p.join()
+    #         p.close()
+    #         p.join()
     #     pbar.close()
 
+    #     board_dict.buffer_to_storage(buffer)
+    #             # del buffer
+    #     print(len(board_dict))
+
+    #             # for i in board_dict.values():
+    #             #     if i[1] != 1:
+    #             #         print(i)
+
+    #     board_list = board_dict.to_list()
+    #     print(len(board_list))
+    #             # # with open('./memory.pth', 'wb') as pickle_file:
+
+    #             # #     pickle.dump(self.board_dict, pickle_file)
+
+    #     data_set = DealDataset(board_list)
+    #     data_loader = DataLoader(dataset=data_set,
+    #                     num_workers=4,
+    #                     pin_memory=True,
+    #                     batch_size=256,
+    #                     shuffle=True)
+
+    #     # self.net.to(device)
+    #     net.train()
+    #     for _ in range(3):
+    #         epoch_loss = 0
+    #         for boards, values in data_loader:
+    #             boards, values = boards.to(device), values.to(device)
+    #             optim.zero_grad()
+
+    #             outputs = net(boards)
+    #             loss_ret = loss(outputs, values)
+    #             epoch_loss += loss_ret.item()
+    #             loss_ret.backward()
+    #             optim.step()
+    #         epoch_loss /= len(data_loader)
+    #         print('loss: %.6f' %epoch_loss)
     # torch.set_num_threads(12)
     # torch.set_num_interop_threads
     # board_dict = Memory()
