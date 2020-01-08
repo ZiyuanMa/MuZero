@@ -65,14 +65,21 @@ class Memory:
         return len(self.storage)
 
     def get_batch(self):
-        keys = []
+        sub_keys1 = []
+        sub_keys2 = []
         for key, value in self.storage.items():
-            if key[1]==0 or value.get_visit_times() >= config.min_visit_times:
+            if key[1]==0:
+                sub_keys1.append(key)
+            elif value.get_visit_times() >= config.min_visit_times:
+                sub_keys2.append(key)
 
-                keys.append(key)
-        print('avaliable: '+str(len(keys)))
-        if len(keys) > config.batch_size:
-            keys = random.sample(keys, config.batch_size)
+        print('avaliable: '+str(len(sub_keys1)+len(sub_keys2)))
+        if len(sub_keys2) < config.batch_size*0.75:
+            keys = random.sample(sub_keys1, config.batch_size-len(sub_keys2))
+            keys.extend(sub_keys2)
+        else:
+            keys = random.sample(sub_keys1, config.batch_size*0.25)
+            keys.extend(random.sample(sub_keys2, config.batch_size*0.75))
 
         return list(map(lambda key: (np.concatenate((np.frombuffer(key[0]).reshape(8,8), key[1]*np.ones([8, 8]))), self.storage[key].get_value()), keys))
 
