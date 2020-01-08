@@ -18,8 +18,8 @@ else:
     device = torch.device('cpu')
 torch.manual_seed(1261)
 random.seed(1261)
-# torch.backends.cudnn.deterministic = True
-# torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = True
 # torch.set_num_interop_threads(2)
 # torch.set_num_threads(12)
 
@@ -37,11 +37,11 @@ def self_play(net, buffer):
     while True:
         bytes_board = board.tobytes()
         if (bytes_board, next) not in buffer:
-            buffer[(bytes_board, 0)] = [0, 1]
+            buffer[(bytes_board, next)] = [0, 1]
         else:
-            tmp = buffer[(bytes_board, 0)]
+            tmp = buffer[(bytes_board, next)]
             tmp[1] += 1
-            buffer[(bytes_board, 0)] = tmp
+            buffer[(bytes_board, next)] = tmp
 
         if next == 0:
             break
@@ -248,7 +248,7 @@ class model:
         self.net = CNN()
         self.net.share_memory()
         self.loss = nn.MSELoss()
-        self.optim = torch.optim.SGD(self.net.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0001)
+        self.optim = torch.optim.AdamW(self.net.parameters())
         self.round = config.round
         if not self.load():
             self.start_round = 0
@@ -257,7 +257,7 @@ class model:
             self.board_dict = Memory()
 
     def load(self):
-        if not os.path.exists('./model.pth') or os.path.exists('./memory.pth'):
+        if not os.path.exists('./model.pth') or not os.path.exists('./memory.pth'):
             return False
 
         checkpoint = torch.load('./model.pth')
@@ -311,9 +311,8 @@ class model:
                 p.join()
                 pbar.close()
 
-            # buffer = buffer.copy()
-            self.board_dict.buffer_to_storage(buffer)
-            # del buffer
+            self.board_dict.buffer_to_storage(buffer.copy())
+
             print(len(self.board_dict))
 
             # for i in board_dict.values():
@@ -322,9 +321,6 @@ class model:
 
             board_list = self.board_dict.to_list()
             print(len(board_list))
-            with open('./memory.pth', 'wb') as pickle_file:
-
-                pickle.dump(self.board_dict, pickle_file)
 
             data_set = DealDataset(board_list)
             data_loader = DataLoader(dataset=data_set,
@@ -350,7 +346,9 @@ class model:
                 print('loss: %.6f' %epoch_loss)
 
             # self.net.to(torch.device('cpu'))
-            
+
+            with open('./memory.pth', 'wb') as pickle_file:
+                pickle.dump(self.board_dict, pickle_file)
 
             torch.save({
                     'net': self.net.state_dict(),
@@ -359,7 +357,7 @@ class model:
                     'episodes': self.episodes,
                     'epoch': self.epoch
             }, './model.pth')
-            # self.optim.param_groups[0]["lr"]/=2
+
         self.test()
 
     def test(self):
@@ -424,7 +422,7 @@ class model:
             return 0
 
 if __name__ == '__main__':
-    mp.set_start_method('forkserver')
+    mp.set_start_method('spawn')
     m = model()
     m.train()
 

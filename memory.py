@@ -9,29 +9,28 @@ class Board:
         round_info[0] = round_info[0]/round_info[1]
         round_info.append(config.memory_size)
         self.info_list = [round_info]
-        self.visit_times = round_info[1]
 
     def update(self, round_info=None):
 
-        if self.info_list[0][2] == 1:
-            self.visit_times -= self.info_list[0][1]
+        if self.info_list[0][2] == 0:
             del self.info_list[0]
 
         for info in self.info_list:
             info[2] -= 1
 
         if round_info:
-            self.info_list.append(round_info+[config.memory_size])
-            self.visit_times += round_info[1]
-
+            round_info = round_info.copy()
+            round_info[0] = round_info[0]/round_info[1] 
+            round_info.append(config.memory_size)
+            self.info_list.append(round_info)
 
     def __len__(self):
         return len(self.info_list)
 
     def get_value(self):
-        size = len(self.info_list)
+
         value = self.info_list[0][0]
-        if size == 1:
+        if len(self.info_list) == 1:
             return value
 
         else:
@@ -39,11 +38,20 @@ class Board:
                 value = value * (1-config.update_rate) + info[0] * config.update_rate
             return value
 
+    def get_visit_times(self):
+        visit_times = self.info_list[0][1]
+        if len(self.info_list) == 1:
+            return visit_times
+
+        else:
+            for info in self.info_list[1:]:
+                visit_times = visit_times * (1-config.update_rate) + info[1] * config.update_rate
+            return round(visit_times)
 
 class Memory:
     def __init__(self):
         self.storage = dict()
-        self.buffer = dict()
+
         #print(self.storage)
 
         #print(len(self.storage[0]))
@@ -54,10 +62,10 @@ class Memory:
     def to_list(self):
         keys = []
         for key, value in self.storage.items():
-            if value.visit_times >= config.min_visit_times or key[1]==0:
+            if key[1]==0 or value.get_visit_times() >= config.min_visit_times:
 
                 keys.append(key)
-
+        print('avaliable: '+str(len(keys)))
         if len(keys) > config.batch_size:
             keys = random.sample(keys, config.batch_size)
 
@@ -80,7 +88,7 @@ class Memory:
         for key, value in self.storage.items():
             if key in buffer:
                 value.update(buffer[key].copy())
-                # del buffer[key]
+                del buffer[key]
             else:
                 value.update()
                 if len(value) == 0:
@@ -88,7 +96,7 @@ class Memory:
         
         # write new board in buffer to storage
         for key, value in buffer.items():
-            np.frombuffer(key[0]).reshape(8,8)
+
             self.storage[key] = Board(value)
         
 
