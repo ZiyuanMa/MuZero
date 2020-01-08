@@ -39,14 +39,19 @@ class Board:
             return value
 
     def get_visit_times(self):
-        visit_times = self.info_list[0][1]
-        if len(self.info_list) == 1:
-            return visit_times
+        # visit_times = self.info_list[0][1]
+        # if len(self.info_list) == 1:
+        #     return visit_times
 
-        else:
-            for info in self.info_list[1:]:
-                visit_times = visit_times * (1-config.update_rate) + info[1] * config.update_rate
-            return round(visit_times)
+        # else:
+        #     for info in self.info_list[1:]:
+        #         visit_times = visit_times * (1-config.update_rate) + info[1] * config.update_rate
+        #     return round(visit_times)
+        
+        visit_times = 0
+        for info in self.info_list:
+            visit_times += info[1]
+        return visit_times
 
 class Memory:
     def __init__(self):

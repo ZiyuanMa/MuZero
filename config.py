@@ -1,7 +1,7 @@
 
 
 round = 15
-episodes = 10000
+episodes = 15000
 epoch = 3
 memory_size = 3     # store 3 rounds game 30000 games
 update_rate = 0.65

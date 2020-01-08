@@ -305,10 +305,10 @@ class model:
             with open('./memory.pth', 'wb') as pickle_file:
                 pickle.dump(self.memory_pool, pickle_file)
 
-            # if i < self.round-1:
-            #     model_suffix = str(i+1)
-            # else:
-            #     model_suffix = ''
+            if i < self.round-1:
+                model_suffix = str(i+1)
+            else:
+                model_suffix = ''
 
             torch.save({
                     'net': self.net.state_dict(),
@@ -316,7 +316,7 @@ class model:
                     'start_round': i+1,
                     'episodes': self.episodes,
                     'epoch': self.epoch
-            }, './model.pth')
+            }, './model'+model_suffix+'.pth')
 
         self.test()
 
