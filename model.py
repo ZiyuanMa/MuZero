@@ -280,8 +280,6 @@ class model:
 
     def train(self):
 
-        self.board_dict = Memory()
-
         for i in range(self.start_round, self.round):
             print('round ' + str(i+1) + ' start')
             self.net.eval()
