@@ -52,7 +52,7 @@ class Memory:
 
         bytes_board = board.tobytes()
         if (bytes_board, next) not in self.buffer:
-
+            np.frombuffer(bytes_board).reshape(8,8)
             self.buffer[(bytes_board, next)] = [0, 1]
 
         else:
@@ -64,13 +64,23 @@ class Memory:
 
         return len(self.storage)
 
-    def to_list(self, min=2):
-        l = []
+    def to_list(self):
+        keys = []
         for key, value in self.storage.items():
             if value.visit_times >= config.min_visit_times or key[1]==0:
-                l.append(np.concatenate((np.frombuffer(key[0], dtype='int8').reshape(8,8), key[1]*np.ones((8, 8))), value[0]/value[1]))
-            
-        return l
+
+                keys.append(key)
+        if len(keys) > config.batch_size:
+            keys = random.sample(keys, config.batch_size)
+        # for board, next in keys:
+        #     print('start')
+        #     a = np.frombuffer(board).reshape(8,8)
+        #     b = next*np.ones([8, 8])
+        #     print(a.dtype)
+        #     print(b.dtype)
+        #     c = np.concatenate((a, b))
+        #     print(c)
+        return list(map(lambda key: (np.concatenate((np.frombuffer(key[0]).reshape(8,8), key[1]*np.ones([8, 8]))), self.storage[key].get_value()), keys))
 
     # def __str__(self):
     #     string = ''
@@ -105,6 +115,7 @@ class Memory:
         
         # write new board in buffer to storage
         for key, value in self.buffer.items():
+            np.frombuffer(key[0]).reshape(8,8)
             self.storage[key] = Board(value)
         
         self.buffer.clear()

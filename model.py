@@ -8,9 +8,13 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from  multiprocessing.managers import BaseManager
+BaseManager.register('Memory', Memory, exposed=[ 'meet', '__len__', 'to_list', 'buffer_to_storage', 'round_result'])
+manager = BaseManager()
+manager.start()
 import multiprocessing as mp
 import numpy as np
 from tqdm import tqdm
+import pickle
 import os
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -23,7 +27,89 @@ random.seed(1261)
 # torch.set_num_interop_threads(2)
 # torch.set_num_threads(12)
 
+@torch.no_grad()
+def self_play(net, board_dict):
 
+    board = np.zeros([8,8])
+    board[3][3] = 1
+    board[4][4] = 1
+    board[3][4] = -1
+    board[4][3] = -1
+    next = 1
+    chess_piece = np.count_nonzero(board)
+    round_boards = []
+    while True:
+
+        positions = available_pos(board, next)
+        if len(positions) == 0:
+            next = -next
+            positions = available_pos(board, next)
+
+            if len(positions) == 0:
+                board_dict.meet(board, 0)
+                round_boards.append((np.copy(board), 0))
+                break
+            else:
+                board_dict.meet(board, next)
+                round_boards.append((np.copy(board), next))
+        else:
+            board_dict.meet(board, next)
+            round_boards.append((np.copy(board), next))
+
+
+        # visit_times = []
+        next_boards = np.empty([len(positions), 2, 8, 8])
+        for i, position in enumerate(positions):
+            row, column = position
+            temp_board = np.copy(board)
+            set_position(temp_board, row, column, next)
+
+            temp_next = -next
+            temp_pos = available_pos(temp_board, temp_next)
+            if len(temp_pos) == 0:
+                temp_next = -temp_next
+                temp_pos = available_pos(temp_board, temp_next)
+
+                if len(temp_pos) == 0:
+                    temp_next = 0
+
+
+
+            next_boards[i,0,:,:] = temp_board
+            next_boards[i,1,:,:] = np.ones((8,8))*temp_next
+            # if self.board_dict.exist(temp_board):
+            #     visit_times.append(self.board_dict.get_value(temp_board)[1])
+            # else:
+            #     visit_times.append(0)
+
+        net_input = torch.from_numpy(next_boards).float().view(-1,2,8,8)
+        net_output = net(net_input)
+        net_output = net_output.view(-1)* next
+        # values = np.asarray(net_output)
+        # values = values.tolist()
+        if chess_piece <= 32:
+
+            prob = np.asarray(torch.softmax(net_output, dim=0))
+            index = np.random.choice(range(len(prob)), p = prob)
+            # sum_visit = sum(visit_times)+1
+            # scores = [value + sqrt(log(sum_visit)/(visit+1)) for value, visit in zip(values, visit_times)]
+            # index = scores.index(max(scores))
+        else:
+            _, index = torch.max(net_output, 0)
+            index = index.item()
+            
+        set_position(board, positions[index][0], positions[index][1], next)
+        chess_piece += 1
+
+        next = -next
+
+    white_score = np.count_nonzero(board==1)
+    black_score = np.count_nonzero(board==-1)
+
+    if white_score > black_score:
+        board_dict.round_result(round_boards, 1)
+    elif white_score < black_score:
+        board_dict.round_result(round_boards, -1)
 class DealDataset(Dataset):
 
     def __init__(self, data):
@@ -45,7 +131,7 @@ class DealDataset(Dataset):
             
             return torch.from_numpy(np.rot90(narray, 2).copy()).float().view(2,8,8)
         else:
-            return torch.from_numpy(narray).float().view(1,8,8)
+            return torch.from_numpy(narray).float().view(2,8,8)
 
 class CNN(nn.Module):
     def __init__(self):
@@ -128,9 +214,10 @@ class model:
             self.start_round = 0
             self.episodes = config.episodes
             self.epoch = config.epoch
+            self.board_dict = manager.Memory()
 
     def load(self):
-        if not os.path.exists('./model.pth'):
+        if not os.path.exists('./model.pth') or os.path.exists('./memory.pth'):
             return False
 
         checkpoint = torch.load('./model.pth')
@@ -144,6 +231,10 @@ class model:
         self.episodes = checkpoint['episodes']
         self.epoch = checkpoint['epoch']
 
+        with open('./memory.pth', 'rb') as pickle_file:
+
+            self.board_dict = pickle.load(pickle_file)
+
         return True
 
 
@@ -156,30 +247,28 @@ class model:
             
             # self.board_dict = Memory()
 
-            # for _ in tqdm(range(self.game_num)):
-            #     self.self_play()
-
-            BaseManager.register('Memory', Memory, exposed=['get_init_board', 'meet', '__len__', 'to_list', '__str__', 'exist', 'round_result', 'get_value'])
-            manager = BaseManager()
-            manager.start()
-            self.board_dict = manager.Memory()
+            for _ in tqdm(range(config.episodes)):
+                self_play(self.net, self.board_dict)
 
 
-            with mp.Pool(2) as p:
-                pbar = tqdm(total=config.episodes)
-                def update(ret):
-                    pbar.update()
+            # with mp.Pool(2) as p:
+            #     pbar = tqdm(total=config.episodes)
+            #     def update(ret):
+            #         pbar.update()
 
-                for _ in range(config.episodes):
-                    p.apply_async(self.self_play, callback=update)
+            #     for _ in range(config.episodes):
+            #         p.apply_async(self_play, args=(self.net, self.board_dict), callback=update)
 
 
-                p.close()
-                p.join()
-                pbar.close()
+            #     p.close()
+            #     p.join()
+            #     pbar.close()
 
-            
+            self.board_dict.buffer_to_storage()
             print(len(self.board_dict))
+            with open('./memory.pth', 'wb') as pickle_file:
+
+                pickle.dump(self.board_dict, pickle_file)
 
             # for i in board_dict.values():
             #     if i[1] != 1:
@@ -221,7 +310,7 @@ class model:
                     'episodes': self.episodes,
                     'epoch': self.epoch
             }, './model.pth')
-            self.optim.param_groups[0]["lr"]/=2
+            # self.optim.param_groups[0]["lr"]/=2
         self.test()
 
     def test(self):
@@ -371,7 +460,7 @@ class model:
 
 if __name__ == '__main__':
     m = model()
-    m.train(False)
+    m.train()
 
     # m.test()
     # m.s_play()
