@@ -12,10 +12,6 @@ import numpy as np
 from tqdm import tqdm
 import pickle
 import os
-if torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
 torch.manual_seed(1261)
 random.seed(1261)
 torch.backends.cudnn.deterministic = True
@@ -47,41 +43,7 @@ def self_play(net, buffer):
             break
         else:
             positions = available_pos(board, next)
-        # if len(positions) == 0:
-        #     next = -next
-        #     positions = available_pos(board, next)
-
-        #     if len(positions) == 0:
-
-        #         if (bytes_board, 0) not in buffer:
-        #             buffer[(bytes_board, 0)] = [0, 1]
-        #         else:
-        #             tmp = buffer[(bytes_board, 0)]
-        #             tmp[1] += 1
-        #             buffer[(bytes_board, 0)] = tmp
-        #         round_boards.append((bytes_board, 0))
-        #         break
-        #     else:
-
-        #         if (bytes_board, next) not in buffer:
-        #             buffer[(bytes_board, next)] = [0, 1]
-        #         else:
-        #             tmp = buffer[(bytes_board, next)]
-        #             tmp[1] += 1
-        #             buffer[(bytes_board, next)] = tmp
-
-        #         round_boards.append((bytes_board, next))
-        # else:
-
-        #     if (bytes_board, next) not in buffer:
-        #         buffer[(bytes_board, next)] = [0, 1]
-        #     else:
-        #         tmp = buffer[(bytes_board, next)]
-        #         tmp[1] += 1
-        #         buffer[(bytes_board, next)] = tmp
-
-        #     round_boards.append((bytes_board, next))
-
+        
 
         # visit_times = []
         next_list = []
@@ -104,8 +66,8 @@ def self_play(net, buffer):
             next_list.append(temp_next)
             next_boards[i,0,:,:] = temp_board
             next_boards[i,1,:,:] = np.ones((8,8))*temp_next
-            # if self.board_dict.exist(temp_board):
-            #     visit_times.append(self.board_dict.get_value(temp_board)[1])
+            # if self.memory_pool.exist(temp_board):
+            #     visit_times.append(self.memory_pool.get_value(temp_board)[1])
             # else:
             #     visit_times.append(0)
 
@@ -149,7 +111,7 @@ def self_play(net, buffer):
             buffer[key] = tmp
 
 
-class DealDataset(Dataset):
+class Dataset(Dataset):
 
     def __init__(self, data):
 
@@ -172,9 +134,9 @@ class DealDataset(Dataset):
         else:
             return torch.from_numpy(narray).float().view(2,8,8)
 
-class CNN(nn.Module):
+class Network(nn.Module):
     def __init__(self):
-        super(CNN, self).__init__()
+        super(Network, self).__init__()
 
         # 8x8 input 6x6 output
         self.conv1 = nn.Sequential(
@@ -245,7 +207,7 @@ class CNN(nn.Module):
 class model:
 
     def __init__(self):
-        self.net = CNN()
+        self.net = Network()
         self.net.share_memory()
         self.loss = nn.MSELoss()
         self.optim = torch.optim.AdamW(self.net.parameters())
@@ -254,7 +216,7 @@ class model:
             self.start_round = 0
             self.episodes = config.episodes
             self.epoch = config.epoch
-            self.board_dict = Memory()
+            self.memory_pool = Memory()
 
     def load(self):
         if not os.path.exists('./model.pth') or not os.path.exists('./memory.pth'):
@@ -273,7 +235,7 @@ class model:
 
         with open('./memory.pth', 'rb') as pickle_file:
 
-            self.board_dict = pickle.load(pickle_file)
+            self.memory_pool = pickle.load(pickle_file)
 
         return True
 
@@ -284,10 +246,10 @@ class model:
             print('round ' + str(i+1) + ' start')
             self.net.eval()
             
-            # self.board_dict = Memory()
+            # self.memory_pool = Memory()
 
             # for _ in tqdm(range(config.episodes)):
-            #     self_play(self.net, self.board_dict)
+            #     self_play(self.net, self.memory_pool)
             buffer = mp.Manager().dict()
 
             # with mp.Pool(2) as p:
@@ -309,30 +271,26 @@ class model:
                 p.join()
                 pbar.close()
 
-            self.board_dict.buffer_to_storage(buffer.copy())
+            self.memory_pool.buffer_to_storage(buffer.copy())
 
-            print(len(self.board_dict))
+            print(len(self.memory_pool))
 
-            # for i in board_dict.values():
-            #     if i[1] != 1:
-            #         print(i)
 
-            board_list = self.board_dict.to_list()
-            print(len(board_list))
+            board_batch = self.memory_pool.get_batch()
+            print(len(board_batch))
 
-            data_set = DealDataset(board_list)
+            data_set = Dataset(board_batch)
             data_loader = DataLoader(dataset=data_set,
                             num_workers=4,
                             pin_memory=True,
                             batch_size=256,
                             shuffle=True)
 
-            # self.net.to(device)
+
             self.net.train()
             for _ in range(self.epoch):
                 epoch_loss = 0
                 for boards, values in data_loader:
-                    boards, values = boards.to(device), values.to(device)
                     self.optim.zero_grad()
 
                     outputs = self.net(boards)
@@ -343,10 +301,14 @@ class model:
                 epoch_loss /= len(data_loader)
                 print('loss: %.6f' %epoch_loss)
 
-            # self.net.to(torch.device('cpu'))
 
             with open('./memory.pth', 'wb') as pickle_file:
-                pickle.dump(self.board_dict, pickle_file)
+                pickle.dump(self.memory_pool, pickle_file)
+
+            # if i < self.round-1:
+            #     model_suffix = str(i+1)
+            # else:
+            #     model_suffix = ''
 
             torch.save({
                     'net': self.net.state_dict(),
@@ -427,7 +389,7 @@ if __name__ == '__main__':
     # m.test()
     # m.s_play()
     # board_dict = Memory()
-    # net = CNN()
+    # net = Network()
     # net.eval()
     # net.share_memory()
     # loss = nn.MSELoss()
@@ -466,13 +428,13 @@ if __name__ == '__main__':
     #             #     if i[1] != 1:
     #             #         print(i)
 
-    #     board_list = board_dict.to_list()
-    #     print(len(board_list))
+    #     board_batch = board_dict.to_list()
+    #     print(len(board_batch))
     #             # # with open('./memory.pth', 'wb') as pickle_file:
 
-    #             # #     pickle.dump(self.board_dict, pickle_file)
+    #             # #     pickle.dump(self.memory_pool, pickle_file)
 
-    #     data_set = DealDataset(board_list)
+    #     data_set = Dataset(board_batch)
     #     data_loader = DataLoader(dataset=data_set,
     #                     num_workers=4,
     #                     pin_memory=True,

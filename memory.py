@@ -59,7 +59,7 @@ class Memory:
 
         return len(self.storage)
 
-    def to_list(self):
+    def get_batch(self):
         keys = []
         for key, value in self.storage.items():
             if key[1]==0 or value.get_visit_times() >= config.min_visit_times:
@@ -83,7 +83,7 @@ class Memory:
 
     #     return string
 
-    def buffer_to_storage(self, buffer):
+    def buffer_to_storage(self, buffer: dict):
         # update storage
         for key, value in self.storage.items():
             if key in buffer:
