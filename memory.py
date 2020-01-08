@@ -47,19 +47,6 @@ class Memory:
         #print(self.storage)
 
         #print(len(self.storage[0]))
-    
-    def meet(self, board, next):
-
-        bytes_board = board.tobytes()
-        if (bytes_board, next) not in self.buffer:
-            np.frombuffer(bytes_board).reshape(8,8)
-            self.buffer[(bytes_board, next)] = [0, 1]
-
-        else:
-
-            self.buffer[(bytes_board, next)][1] += 1
-
-
     def __len__(self):
 
         return len(self.storage)
@@ -73,14 +60,7 @@ class Memory:
 
         if len(keys) > config.batch_size:
             keys = random.sample(keys, config.batch_size)
-        # for board, next in keys:
-        #     print('start')
-        #     a = np.frombuffer(board).reshape(8,8)
-        #     b = next*np.ones([8, 8])
-        #     print(a.dtype)
-        #     print(b.dtype)
-        #     c = np.concatenate((a, b))
-        #     print(c)
+
         return list(map(lambda key: (np.concatenate((np.frombuffer(key[0]).reshape(8,8), key[1]*np.ones([8, 8]))), self.storage[key].get_value()), keys))
 
     # def __str__(self):
@@ -94,14 +74,6 @@ class Memory:
     #                 string += '\t' + str(value[0]) + '  ' + str(value[1]) + '\n'
 
     #     return string
-
-
-    def round_result(self, round_boards, result):
-
-        for board, next in round_boards:
-            bytes_board = board.tobytes()
-            self.buffer[(bytes_board, next)][0] += result
-
 
     def buffer_to_storage(self, buffer):
         # update storage

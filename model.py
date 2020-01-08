@@ -32,48 +32,59 @@ def self_play(net, buffer):
     board[3][4] = -1
     board[4][3] = -1
     next = 1
-    chess_piece = np.count_nonzero(board)
+    chess_piece = 4
     round_boards = []
     while True:
         bytes_board = board.tobytes()
-        positions = available_pos(board, next)
-        if len(positions) == 0:
-            next = -next
-            positions = available_pos(board, next)
-
-            if len(positions) == 0:
-
-                if (bytes_board, 0) not in buffer:
-                    buffer[(bytes_board, 0)] = [0, 1]
-                else:
-                    tmp = buffer[(bytes_board, 0)]
-                    tmp[1] += 1
-                    buffer[(bytes_board, 0)] = tmp
-                round_boards.append((bytes_board, 0))
-                break
-            else:
-
-                if (bytes_board, next) not in buffer:
-                    buffer[(bytes_board, next)] = [0, 1]
-                else:
-                    tmp = buffer[(bytes_board, next)]
-                    tmp[1] += 1
-                    buffer[(bytes_board, next)] = tmp
-
-                round_boards.append((bytes_board, next))
+        if (bytes_board, next) not in buffer:
+            buffer[(bytes_board, 0)] = [0, 1]
         else:
+            tmp = buffer[(bytes_board, 0)]
+            tmp[1] += 1
+            buffer[(bytes_board, 0)] = tmp
 
-            if (bytes_board, next) not in buffer:
-                buffer[(bytes_board, next)] = [0, 1]
-            else:
-                tmp = buffer[(bytes_board, next)]
-                tmp[1] += 1
-                buffer[(bytes_board, next)] = tmp
+        if next == 0:
+            break
+        else:
+            positions = available_pos(board, next)
+        # if len(positions) == 0:
+        #     next = -next
+        #     positions = available_pos(board, next)
 
-            round_boards.append((bytes_board, next))
+        #     if len(positions) == 0:
+
+        #         if (bytes_board, 0) not in buffer:
+        #             buffer[(bytes_board, 0)] = [0, 1]
+        #         else:
+        #             tmp = buffer[(bytes_board, 0)]
+        #             tmp[1] += 1
+        #             buffer[(bytes_board, 0)] = tmp
+        #         round_boards.append((bytes_board, 0))
+        #         break
+        #     else:
+
+        #         if (bytes_board, next) not in buffer:
+        #             buffer[(bytes_board, next)] = [0, 1]
+        #         else:
+        #             tmp = buffer[(bytes_board, next)]
+        #             tmp[1] += 1
+        #             buffer[(bytes_board, next)] = tmp
+
+        #         round_boards.append((bytes_board, next))
+        # else:
+
+        #     if (bytes_board, next) not in buffer:
+        #         buffer[(bytes_board, next)] = [0, 1]
+        #     else:
+        #         tmp = buffer[(bytes_board, next)]
+        #         tmp[1] += 1
+        #         buffer[(bytes_board, next)] = tmp
+
+        #     round_boards.append((bytes_board, next))
 
 
         # visit_times = []
+        next_list = []
         next_boards = np.empty([len(positions), 2, 8, 8])
         for i, position in enumerate(positions):
             row, column = position
@@ -90,7 +101,7 @@ def self_play(net, buffer):
                     temp_next = 0
 
 
-
+            next_list.append(temp_next)
             next_boards[i,0,:,:] = temp_board
             next_boards[i,1,:,:] = np.ones((8,8))*temp_next
             # if self.board_dict.exist(temp_board):
@@ -103,7 +114,7 @@ def self_play(net, buffer):
         net_output = net_output.view(-1)* next
         # values = np.asarray(net_output)
         # values = values.tolist()
-        if chess_piece <= 32:
+        if chess_piece < 40:
 
             prob = np.asarray(torch.softmax(net_output, dim=0))
             index = np.random.choice(range(len(prob)), p = prob)
@@ -117,7 +128,7 @@ def self_play(net, buffer):
         set_position(board, positions[index][0], positions[index][1], next)
         chess_piece += 1
 
-        next = -next
+        next = next_list[index]
 
     white_score = np.count_nonzero(board==1)
     black_score = np.count_nonzero(board==-1)
@@ -311,9 +322,9 @@ class model:
 
             board_list = self.board_dict.to_list()
             print(len(board_list))
-            # # with open('./memory.pth', 'wb') as pickle_file:
+            with open('./memory.pth', 'wb') as pickle_file:
 
-            # #     pickle.dump(self.board_dict, pickle_file)
+                pickle.dump(self.board_dict, pickle_file)
 
             data_set = DealDataset(board_list)
             data_loader = DataLoader(dataset=data_set,
@@ -341,13 +352,13 @@ class model:
             # self.net.to(torch.device('cpu'))
             
 
-            # torch.save({
-            #         'net': self.net.state_dict(),
-            #         'optim': self.optim.state_dict(),
-            #         'start_round': i+1,
-            #         'episodes': self.episodes,
-            #         'epoch': self.epoch
-            # }, './model.pth')
+            torch.save({
+                    'net': self.net.state_dict(),
+                    'optim': self.optim.state_dict(),
+                    'start_round': i+1,
+                    'episodes': self.episodes,
+                    'epoch': self.epoch
+            }, './model.pth')
             # self.optim.param_groups[0]["lr"]/=2
         self.test()
 
@@ -413,7 +424,7 @@ class model:
             return 0
 
 if __name__ == '__main__':
-    mp.set_start_method('spawn')
+    mp.set_start_method('forkserver')
     m = model()
     m.train()
 
