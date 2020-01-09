@@ -110,6 +110,87 @@ def self_play(net, buffer):
             tmp[0] -= 1
             buffer[key] = tmp
 
+@torch.no_grad()
+def model_against(white_net, black_net):
+    board = np.zeros([8,8])
+    board[3][3] = 1
+    board[4][4] = 1
+    board[3][4] = -1
+    board[4][3] = -1
+    next = 1
+
+    while True:
+
+        positions = available_pos(board, next)
+        if len(positions) == 0:
+            next = -next
+            positions = available_pos(board, next)
+        if len(positions) == 0:
+            break
+
+        next_list = []
+        next_boards = np.empty([len(positions), 2, 8, 8])
+        for i, position in enumerate(positions):
+            row, column = position
+            temp_board = np.copy(board)
+            set_position(temp_board, row, column, next)
+
+            temp_next = -next
+            temp_pos = available_pos(temp_board, temp_next)
+            if len(temp_pos) == 0:
+                temp_next = -temp_next
+                temp_pos = available_pos(temp_board, temp_next)
+
+                if len(temp_pos) == 0:
+                    temp_next = 0
+
+
+            next_list.append(temp_next)
+            next_boards[i,0,:,:] = temp_board
+            next_boards[i,1,:,:] = np.ones((8,8))*temp_next
+
+        net_input = torch.from_numpy(next_boards).float().view(-1,2,8,8)
+        if next == 1:
+            net_output = white_net(net_input)
+        else:
+            net_output = black_net(net_input)
+
+        net_output = net_output.view(-1)* next
+
+        _, index = torch.max(net_output, 0)
+        index = index.item()
+            
+        set_position(board, positions[index][0], positions[index][1], next)
+
+        next = next_list[index]
+
+    white_score = np.count_nonzero(board==1)
+    black_score = np.count_nonzero(board==-1)
+
+    return white_score, black_score
+
+
+
+def test_new_model(last_model_num, new_net):
+    new_net.eval()
+    checkpoint = torch.load('./model'+str(last_model_num)+'.pth')
+    last_net = Network()
+    last_net.load_state_dict(checkpoint['net'])
+    last_net.eval()
+
+    last_white, last_black = model_against(last_net, last_net)
+
+    print('last model\nwhite score: %i, black score: %i\n'%(last_white, last_black))
+
+    new_white, last_black = model_against(new_net, last_net)
+
+    print('new model with white\nwhite score: %i, black score: %i'%(new_white, last_black))
+
+    last_white, new_black = model_against(last_net, new_net)
+
+    print('new model with black\nwhite score: %i, black score: %i'%(last_white, new_black))
+
+
 
 class Dataset(Dataset):
 
@@ -209,6 +290,7 @@ class model:
     def __init__(self):
         self.net = Network()
         self.net.share_memory()
+        
         self.loss = nn.MSELoss()
         self.optim = torch.optim.AdamW(self.net.parameters())
         self.round = config.round
@@ -217,6 +299,13 @@ class model:
             self.episodes = config.episodes
             self.epoch = config.epoch
             self.memory_pool = Memory()
+            torch.save({
+                    'net': self.net.state_dict(),
+                    'optim': self.optim.state_dict(),
+                    'start_round': 0,
+                    'episodes': self.episodes,
+                    'epoch': self.epoch
+            }, './model0.pth')
 
     def load(self):
         if not os.path.exists('./model.pth') or not os.path.exists('./memory.pth'):
@@ -301,7 +390,7 @@ class model:
                 epoch_loss /= len(data_loader)
                 print('loss: %.6f' %epoch_loss)
 
-
+            test_new_model(i, self.net)
             with open('./memory.pth', 'wb') as pickle_file:
                 pickle.dump(self.memory_pool, pickle_file)
 

@@ -4,6 +4,7 @@ venv
 test.ipynb
 .ipynb_checkpoints
 memory.pth
+model0.pth
 model1.pth
 model2.pth
 model3.pth
