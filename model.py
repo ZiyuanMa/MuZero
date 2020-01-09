@@ -189,6 +189,10 @@ def test_new_model(last_model_num, new_net):
     last_white, new_black = model_against(last_net, new_net)
 
     print('new model with black\nwhite score: %i, black score: %i'%(last_white, new_black))
+    if new_white < last_white or new_black < last_black:
+        return False
+    else:
+        return True
 
 
 
@@ -299,6 +303,8 @@ class model:
             self.episodes = config.episodes
             self.epoch = config.epoch
             self.memory_pool = Memory()
+            with open('./memory.pth', 'wb') as pickle_file:
+                    pickle.dump(self.memory_pool, pickle_file)
             torch.save({
                     'net': self.net.state_dict(),
                     'optim': self.optim.state_dict(),
@@ -330,8 +336,8 @@ class model:
 
 
     def train(self):
-
-        for i in range(self.start_round, self.round):
+        i = self.start_round
+        while i < self.round:
             print('round ' + str(i+1) + ' start')
             self.net.eval()
             
@@ -390,22 +396,33 @@ class model:
                 epoch_loss /= len(data_loader)
                 print('loss: %.6f' %epoch_loss)
 
-            test_new_model(i, self.net)
-            with open('./memory.pth', 'wb') as pickle_file:
-                pickle.dump(self.memory_pool, pickle_file)
 
-            if i < self.round-1:
-                model_suffix = str(i+1)
+            if test_new_model(i, self.net):
+                print('new model pass, start next round')
+                with open('./memory.pth', 'wb') as pickle_file:
+                    pickle.dump(self.memory_pool, pickle_file)
+
+                if i < self.round-1:
+                    model_suffix = str(i+1)
+                else:
+                    model_suffix = ''
+
+                torch.save({
+                        'net': self.net.state_dict(),
+                        'optim': self.optim.state_dict(),
+                        'start_round': i+1,
+                        'episodes': self.episodes,
+                        'epoch': self.epoch
+                }, './model'+model_suffix+'.pth')
+                i += 1
             else:
-                model_suffix = ''
+                print('new model fail, retrain model')
+                checkpoint = torch.load('./model'+str(i)+'.pth')
+                self.net.load_state_dict(checkpoint['net'])
+                self.optim.load_state_dict(checkpoint['optim'])
 
-            torch.save({
-                    'net': self.net.state_dict(),
-                    'optim': self.optim.state_dict(),
-                    'start_round': i+1,
-                    'episodes': self.episodes,
-                    'epoch': self.epoch
-            }, './model'+model_suffix+'.pth')
+                with open('./memory.pth', 'rb') as pickle_file:
+                    self.memory_pool = pickle.load(pickle_file)
 
         self.test()
 
