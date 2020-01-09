@@ -78,8 +78,8 @@ class Memory:
             keys = random.sample(sub_keys1, config.batch_size-len(sub_keys2))
             keys.extend(sub_keys2)
         else:
-            keys = random.sample(sub_keys1, config.batch_size*0.25)
-            keys.extend(random.sample(sub_keys2, config.batch_size*0.75))
+            keys = random.sample(sub_keys1, int(config.batch_size*0.25))
+            keys.extend(random.sample(sub_keys2, int(config.batch_size*0.75)))
 
         return list(map(lambda key: (np.concatenate((np.frombuffer(key[0]).reshape(8,8), key[1]*np.ones([8, 8]))), self.storage[key].get_value()), keys))
 
