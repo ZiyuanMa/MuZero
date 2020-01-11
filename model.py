@@ -109,6 +109,30 @@ def self_play(net, buffer):
             tmp = buffer[key]
             tmp[0] -= 1
             buffer[key] = tmp
+def random_play(data_dict):
+    board = np.zeros([8,8])
+    board[3][3] = 1
+    board[4][4] = 1
+    board[3][4] = -1
+    board[4][3] = -1
+    next = 1
+    round = 0
+    while True:
+        bytes_board = board.tobytes()
+        positions = available_pos(board, next)
+        if len(positions) == 0:
+            next = -next
+            positions = available_pos(board, next)
+            if len(positions) == 0:
+                break
+        key = (bytes_board, next)
+        if key not in data_dict:
+            data_dict[key] = []
+
+        row, column = random.choice(positions)
+        set_position(board, row, column, next)
+        round += 1
+        next = -next
 
 @torch.no_grad()
 def model_against(white_net, black_net):
@@ -126,6 +150,7 @@ def model_against(white_net, black_net):
             next = -next
             positions = available_pos(board, next)
         if len(positions) == 0:
+            
             break
 
         next_list = []
@@ -219,6 +244,34 @@ class Dataset(Dataset):
         else:
             return torch.from_numpy(narray).float().view(2,8,8)
 
+class ResidualBlock(nn.Module):
+    def __init__(self):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(128, 128, 3, 1, 1)
+        self.bn1 = nn.BatchNorm2d(128)
+        self.relu = nn.LeakyReLU()
+        self.conv2 = conv3x3(out_channels, out_channels)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.downsample = downsample
+        
+    def forward(self, x):
+        residual = x
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        if self.downsample:
+            residual = self.downsample(x)
+        out += residual
+        out = self.LeakyReLU(out)
+        return out
+
+class Flatten(nn.Module):
+
+    def forward(self, input):
+        return input.view(input.size(0), -1)
+
 class Network(nn.Module):
     def __init__(self):
         super(Network, self).__init__()
@@ -226,27 +279,42 @@ class Network(nn.Module):
         # 8x8 input 6x6 output
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels=2,
-                            out_channels=256,
+                            out_channels=config.filter_num,
                             kernel_size=3,
                             stride=1,
                             padding=0),
-            nn.BatchNorm2d(256),
+            nn.BatchNorm2d(config.filter_num),
             nn.LeakyReLU()
         )
 
-        # 6x6 input 4x4 output
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(256, 256, 3, 1, 0),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU()
+        self.res1 = nn.Sequential(
+            nn.Conv2d(config.filter_num, config.filter_num, 3, 1, 1),
+            nn.BatchNorm2d(config.filter_num),
+            nn.LeakyReLU(),
+            nn.Conv2d(config.filter_num, config.filter_num, 3, 1, 1),
+            nn.BatchNorm2d(config.filter_num)
         )
 
-        # 4x4 input 1x1 output
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(256, 256, 3, 1, 0),
-            nn.MaxPool2d(2),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU()
+        self.res2 = nn.Sequential(
+            nn.Conv2d(config.filter_num, config.filter_num, 3, 1, 1),
+            nn.BatchNorm2d(config.filter_num),
+            nn.LeakyReLU(),
+            nn.Conv2d(config.filter_num, config.filter_num, 3, 1, 1),
+            nn.BatchNorm2d(config.filter_num)
+        )
+        self.res3 = nn.Sequential(
+            nn.Conv2d(config.filter_num, config.filter_num, 3, 1, 1),
+            nn.BatchNorm2d(config.filter_num),
+            nn.LeakyReLU(),
+            nn.Conv2d(config.filter_num, config.filter_num, 3, 1, 1),
+            nn.BatchNorm2d(config.filter_num)
+        )
+        self.res4 = nn.Sequential(
+            nn.Conv2d(config.filter_num, config.filter_num, 3, 1, 1),
+            nn.BatchNorm2d(config.filter_num),
+            nn.LeakyReLU(),
+            nn.Conv2d(config.filter_num, config.filter_num, 3, 1, 1),
+            nn.BatchNorm2d(config.filter_num)
         )
 
         # # 8x8 input 2x2 output
@@ -263,30 +331,44 @@ class Network(nn.Module):
         # )
 
         # fully-connected layer
-        self.FC = nn.Sequential(
-            nn.Linear(256,256),
-            nn.Dropout(0.1),
+        self.value = nn.Sequential(
+            nn.Conv2d(config.filter_num, 1, 1, 1, 0),
+            nn.BatchNorm2d(config.filter_num),
             nn.LeakyReLU(),
-            nn.Linear(256,256),
-            nn.Dropout(0.1),
+            nn.Flatten(),
+            nn.Linear(config.filter_num,config.filter_num),
             nn.LeakyReLU(),
-            nn.Linear(256,1),
+            nn.Linear(config.filter_num,1),
             nn.Tanh()
         )
 
     def forward(self, x):
 
-        x1_out = self.conv1(x)
-        x1_out = self.conv2(x1_out)
-        x1_out = self.conv3(x1_out)
+        x = self.conv1(x)
 
-        # x2_out = self.conv4(x)
-        # x2_out = self.conv5(x2_out)
+        residual = x
+        x = self.res1(x)
+        x += residual
+        x = nn.LeakyReLU(x)
 
+        residual = x
+        x = self.res2(x)
+        x += residual
+        x = nn.LeakyReLU(x)
 
-        out = self.FC(x1_out.view(x1_out.size(0),-1))
+        residual = x
+        x = self.res3(x)
+        x += residual
+        x = nn.LeakyReLU(x)
 
-        return out
+        residual = x
+        x = self.res4(x)
+        x += residual
+        x = nn.LeakyReLU(x)
+
+        x = self.value(x)
+
+        return x
 
 
 class model:
@@ -298,20 +380,20 @@ class model:
         self.loss = nn.MSELoss()
         self.optim = torch.optim.AdamW(self.net.parameters())
         self.round = config.round
-        if not self.load():
-            self.start_round = 0
-            self.episodes = config.episodes
-            self.epoch = config.epoch
-            self.memory_pool = Memory()
-            with open('./memory.pth', 'wb') as pickle_file:
-                    pickle.dump(self.memory_pool, pickle_file)
-            torch.save({
-                    'net': self.net.state_dict(),
-                    'optim': self.optim.state_dict(),
-                    'start_round': 0,
-                    'episodes': self.episodes,
-                    'epoch': self.epoch
-            }, './model0.pth')
+        # if not self.load():
+        #     self.start_round = 0
+        #     self.episodes = config.episodes
+        #     self.epoch = config.epoch
+        #     self.memory_pool = Memory()
+        #     with open('./memory.pth', 'wb') as pickle_file:
+        #             pickle.dump(self.memory_pool, pickle_file)
+        #     torch.save({
+        #             'net': self.net.state_dict(),
+        #             'optim': self.optim.state_dict(),
+        #             'start_round': 0,
+        #             'episodes': self.episodes,
+        #             'epoch': self.epoch
+        #     }, './model0.pth')
 
     def load(self):
         if not os.path.exists('./model.pth') or not os.path.exists('./memory.pth'):
@@ -334,37 +416,50 @@ class model:
 
         return True
 
+    def generate_data(self):
 
+        self.data = mp.Manager().dict()
+        # with mp.Pool(mp.cpu_count()) as p:
+        #     pbar = tqdm(total=100000)
+        #     def update(ret):
+        #         pbar.update()
+        #     for _ in range(100000):
+        #         p.apply_async(random_play, args=(self.data,), callback= update)
+        #     p.close()
+        #     p.join()
+        #     pbar.close()
+        # with mp.Pool(mp.cpu_count()) as p:
+        for _ in tqdm(range(10000)):
+            random_play(self.data)
+        print(len(self.data))
+        with open('./board_data.pth', 'wb') as pickle_file:
+            pickle.dump(self.data, pickle_file)
     def train(self):
         i = self.start_round
         while i < self.round:
             print('round ' + str(i+1) + ' start')
             self.net.eval()
             
-            # self.memory_pool = Memory()
+            buffer = dict()
 
-            # for _ in tqdm(range(config.episodes)):
-            #     self_play(self.net, self.memory_pool)
-            buffer = mp.Manager().dict()
+            for _ in tqdm(range(config.episodes)):
+                self_play(self.net, buffer)
+            # buffer = mp.Manager().dict()
+
+
 
             # with mp.Pool(2) as p:
-            #     for _ in tqdm(range(config.episodes)):
-            #         p.apply(self_play, args=(self.net, buffer))
+            #     pbar = tqdm(total=config.episodes)
+            #     def update(ret):
+            #         pbar.update()
+
+            #     for _ in range(config.episodes):
+            #         p.apply_async(self_play, args=(self.net, buffer), callback= update)
 
 
-
-            with mp.Pool(2) as p:
-                pbar = tqdm(total=config.episodes)
-                def update(ret):
-                    pbar.update()
-
-                for _ in range(config.episodes):
-                    p.apply_async(self_play, args=(self.net, buffer), callback= update)
-
-
-                p.close()
-                p.join()
-                pbar.close()
+            #     p.close()
+            #     p.join()
+            #     pbar.close()
 
             self.memory_pool.buffer_to_storage(buffer.copy())
 
@@ -490,7 +585,7 @@ class model:
 if __name__ == '__main__':
     mp.set_start_method('spawn')
     m = model()
-    m.train()
+    m.generate_data()
 
     # m.test()
     # m.s_play()

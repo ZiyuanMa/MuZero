@@ -59,3 +59,4 @@ def MCT_search(board, mark):
     set_position(board, row, column, mark)
 
 
+
