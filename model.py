@@ -126,8 +126,8 @@ def random_play(data_dict):
             if len(positions) == 0:
                 break
         key = (bytes_board, next)
-        if key not in data_dict:
-            data_dict[key] = []
+        # if key not in data_dict:
+        data_dict.add(key)
 
         row, column = random.choice(positions)
         set_position(board, row, column, next)
@@ -416,24 +416,6 @@ class model:
 
         return True
 
-    def generate_data(self):
-
-        self.data = mp.Manager().dict()
-        # with mp.Pool(mp.cpu_count()) as p:
-        #     pbar = tqdm(total=100000)
-        #     def update(ret):
-        #         pbar.update()
-        #     for _ in range(100000):
-        #         p.apply_async(random_play, args=(self.data,), callback= update)
-        #     p.close()
-        #     p.join()
-        #     pbar.close()
-        # with mp.Pool(mp.cpu_count()) as p:
-        for _ in tqdm(range(10000)):
-            random_play(self.data)
-        print(len(self.data))
-        with open('./board_data.pth', 'wb') as pickle_file:
-            pickle.dump(self.data, pickle_file)
     def train(self):
         i = self.start_round
         while i < self.round:
