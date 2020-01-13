@@ -6,15 +6,17 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from tqdm import tqdm
 import pickle
+import threading
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
 torch.manual_seed(1261)
 random.seed(1261)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = True
 
 def board_to_input(board, tern):
-    self_board = board==tern
-    opponent_board = board==-tern
-    np_input = np.concatenate(self_board, opponent_board)
+    white_board = board==1
+    black_board = board==-1
+    np_input = np.concatenate((white_board, black_board))
     return torch.from_numpy(np_input).view(1,2,8,8)
 
 class Node:
@@ -40,6 +42,7 @@ class Node:
             self.available_pos = available_pos(self.board, self.tern)
         self.next_prob = []
         self.net = net
+        self.lock = threading.Lock()
     def __len__(self):
         count = 0
         for child in self.children:

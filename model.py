@@ -244,28 +244,6 @@ class Dataset(Dataset):
         else:
             return torch.from_numpy(narray).float().view(2,8,8)
 
-class ResidualBlock(nn.Module):
-    def __init__(self):
-        super(ResidualBlock, self).__init__()
-        self.conv1 = nn.Conv2d(128, 128, 3, 1, 1)
-        self.bn1 = nn.BatchNorm2d(128)
-        self.relu = nn.LeakyReLU()
-        self.conv2 = conv3x3(out_channels, out_channels)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.downsample = downsample
-        
-    def forward(self, x):
-        residual = x
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.conv2(out)
-        out = self.bn2(out)
-        if self.downsample:
-            residual = self.downsample(x)
-        out += residual
-        out = self.LeakyReLU(out)
-        return out
 
 class Flatten(nn.Module):
 
