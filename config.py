@@ -13,4 +13,4 @@ filter_num = 64
 search_times = 200
 
 
-
+board_size = 8
