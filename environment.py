@@ -62,7 +62,7 @@ class Environment:
             return Player.white
         else:
             return Player.black
-    def get_action(self):
+    # def get_action(self):
 
 
     def step(self, action: Action):
