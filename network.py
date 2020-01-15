@@ -135,7 +135,7 @@ class Network(nn.Module):
     self.steps = 0
     self.action_space_size = action_space_size
     input_shape = (3, 8, 8)
-    rp_shape = (num_filters, *input_shape[1:])
+    rp_shape = (filter_num, *input_shape[1:])
     self.representation = Representation(input_shape).to(device)
     self.prediction = Prediction(action_space_size).to(device)
     self.dynamics = Dynamics(rp_shape, (1, 8, 8)).to(device)
@@ -143,10 +143,10 @@ class Network(nn.Module):
   
   def predict_initial_inference(self, x):    
     assert x.ndim in (3, 4)
-    assert x.shape == (2, 6, 7) or x.shape[1:] == (2, 6, 7)
+    assert x.shape == (3, 8, 8) or x.shape[1:] == (2, 6, 7)
     orig_x = x
     if x.ndim == 3:
-        x = x.reshape(1, 2, 6, 7)
+        x = x.reshape(1, 3, 8, 8)
     
     x = torch.Tensor(x).to(device)
     h = self.representation(x)
@@ -160,9 +160,9 @@ class Network(nn.Module):
   def predict_recurrent_inference(self, x, a):
 
     if x.ndim == 3:
-      x = x.reshape(1, 2, 6, 7)
+      x = x.reshape(1, 3, 8, 8)
 
-    a = numpy.full((1, 2, 6, 7), a)
+    a = numpy.full((1, 3, 8, 8), a)
 
     g = self.dynamics(x, torch.Tensor(a).to(device))
     policy, value = self.prediction(g)
@@ -182,3 +182,43 @@ class Network(nn.Module):
   def training_steps(self) -> int:
     # How many steps / batches the network has been trained for.
     return self.steps
+
+class SharedStorage(object):
+
+  def __init__(self):
+    self._networks = {}
+
+  def latest_network(self) -> Network:
+    if self._networks:
+      return self._networks[max(self._networks.keys())]
+    else:
+      # policy -> uniform, value -> 0, reward -> 0
+      return make_uniform_network()
+
+  def old_network(self) -> Network:
+    if self._networks:
+      return self._networks[min(self._networks.keys())]
+    else:
+      # policy -> uniform, value -> 0, reward -> 0
+      return make_uniform_network()
+
+  def save_network(self, step: int, network: Network):
+    self._networks[step] = network
+
+def muzero(config: MuZeroConfig):
+    storage = SharedStorage()
+    replay_buffer = ReplayBuffer(config)
+
+    # Start n concurrent actor threads
+    threads = list()
+    for _ in range(config.num_actors):
+        t = threading.Thread(target=launch_job, args=(run_selfplay, config, storage, replay_buffer))
+        threads.append(t)
+
+    # Start all threads
+    for x in threads:
+        x.start() 
+
+    train_network(config, storage, replay_buffer)
+
+    return storage.latest_network()
