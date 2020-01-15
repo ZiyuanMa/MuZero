@@ -1,26 +1,26 @@
-
 from reversi import *
+import numpy as np
 from dataclasses import dataclass
 
-class Action(object):
+# class Action(object):
 
-  def __init__(self, index: int):
-    self.index = index
+#   def __init__(self, index: int):
+#     self.index = index
 
-  def __hash__(self):
-    return self.index
+#   def __hash__(self):
+#     return self.index
 
-  def __eq__(self, other):
-    return self.index == other.index
+#   def __eq__(self, other):
+#     return self.index == other.index
 
-  def __gt__(self, other):
-    return self.index > other.index
+#   def __gt__(self, other):
+#     return self.index > other.index
 
 
-class Action(dataclass):
-    row: int
-    column: int
-    tern: int
+@dataclass
+class Action():
+    index: int
+
 
 
 class Environment:
@@ -47,7 +47,7 @@ class Environment:
         self.winner = None
         self.resigned = False
     def update(self, board):
-        self.board = numpy.copy(board)
+        self.board = np.copy(board)
         self.turn = self.turn_n()
         self.done = False
         self.winner = None
@@ -132,7 +132,7 @@ class Game:
         self.root_values.append(root.value())
 
     def make_image(self, state_index: int):
-        # Game specific feature planes.    
+        # convert state to Representation network input
         o = Environment().reset()
 
         for current_index in range(0, state_index):
@@ -197,3 +197,51 @@ class ReplayBuffer:
     def sample_position(self, game) -> int:
         # Sample position from game either uniformly or according to some priority.
         return numpy.random.choice(game.history)
+
+class Node(object):
+
+    def __init__(self, prior: float):
+        self.visit_count = 0
+        self.to_play = -1
+        self.prior = prior
+        self.value_sum = 0
+        self.children = {}
+        self.hidden_state = None
+        self.reward = 0
+
+    def expanded(self) -> bool:
+        return len(self.children) > 0
+
+    def value(self) -> float:
+        if self.visit_count == 0:
+            return 0
+        return self.value_sum / self.visit_count
+
+
+class ActionHistory(object):
+  """Simple history container used inside the search.
+
+  Only used to keep track of the actions executed.
+  """
+
+    def __init__(self, history: List[Action], action_space_size: int):
+        self.history = list(history)
+        self.action_space_size = action_space_size
+
+    def clone(self):
+        return ActionHistory(self.history, self.action_space_size)
+
+    def add_action(self, action: Action):
+        self.history.append(action)
+
+    def last_action(self) -> Action:
+        return self.history[-1]
+
+    def action_space(self) -> List[Action]:
+        return [i for i in range(self.action_space_size)]
+
+    def to_play(self) -> Player:
+        if len(self.history) % 2 == 0:
+            return Player.white
+        else:
+            return Player.black

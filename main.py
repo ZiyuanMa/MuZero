@@ -1,7 +1,38 @@
 
 from environment import *
 from network import *
+from config import *
+from typing import Dict, List, Optional
+import math
+import numpy as np
+import enum
+import collections
+MAXIMUM_FLOAT_VALUE = float('inf')
 
+KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
+
+# noinspection PyArgumentList
+Winner = enum.Enum("Winner", "black white draw")
+
+# noinspection PyArgumentList
+Player = enum.Enum("Player", "black white")
+
+class MinMaxStats(object):
+
+  """A class that holds the min-max values of the tree."""
+  def __init__(self, known_bounds: Optional[KnownBounds]):
+    self.maximum = known_bounds.max if known_bounds else -MAXIMUM_FLOAT_VALUE
+    self.minimum = known_bounds.min if known_bounds else MAXIMUM_FLOAT_VALUE
+
+  def update(self, value: float):
+    self.maximum = max(self.maximum, value)
+    self.minimum = min(self.minimum, value)
+
+  def normalize(self, value: float) -> float:
+    if self.maximum > self.minimum:
+      # We normalize only when we have set the maximum and minimum values.
+      return (value - self.minimum) / (self.maximum - self.minimum)
+    return value
 
 
 # MuZero training is split into two independent parts: Network training and
@@ -67,29 +98,29 @@ def run_mcts(config: MuZeroConfig, root: Node, action_history: ActionHistory,
         node = root
         search_path = [node]
 
-    while node.expanded():
-        action, node = select_child(config, node, min_max_stats)
-        history.add_action(action)
-        search_path.append(node)
+        while node.expanded():
+            action, node = select_child(config, node, min_max_stats)
+            history.add_action(action)
+            search_path.append(node)
 
-    # Inside the search tree we use the dynamics function to obtain the next
-    # hidden state given an action and the previous hidden state.
-    parent = search_path[-2]
-    network_output = network.recurrent_inference(parent.hidden_state,
-                                                 history.last_action())
-    expand_node(node, history.to_play(), history.action_space(), network_output)
+        # Inside the search tree we use the dynamics function to obtain the next
+        # hidden state given an action and the previous hidden state.
+        parent = search_path[-2]
+        network_output = network.recurrent_inference(parent.hidden_state,
+                                                history.last_action())
+        expand_node(node, history.to_play(), history.action_space(), network_output)
 
-    backpropagate(search_path, network_output.value, history.to_play(),
-                  config.discount, min_max_stats)
+        backpropagate(search_path, network_output.value, history.to_play(),
+                    config.discount, min_max_stats)
 
 
 def select_action(config: MuZeroConfig, num_moves: int, node: Node,
                   network: Network):
     visit_counts = [
-      (child.visit_count, action) for action, child in node.children.items()
+        (child.visit_count, action) for action, child in node.children.items()
     ]
     t = config.visit_softmax_temperature_fn(
-      num_moves=num_moves, training_steps=network.training_steps())
+        num_moves=num_moves, training_steps=network.training_steps())
     _, action = softmax_sample(visit_counts, t)
     return action
 
@@ -97,7 +128,7 @@ def select_action(config: MuZeroConfig, num_moves: int, node: Node,
 # Select the child with the highest UCB score.
 def select_child(config: MuZeroConfig, node: Node,
                  min_max_stats: MinMaxStats):
-    _ , action, child = max(
+    _, action, child = max(
         (ucb_score(config, node, child, min_max_stats), action,
         child) for action, child in node.children.items())
     return action, child
@@ -106,9 +137,9 @@ def select_child(config: MuZeroConfig, node: Node,
 # The score for a node is based on its value, plus an exploration bonus based on
 # the prior.
 def ucb_score(config: MuZeroConfig, parent: Node, child: Node,
-              min_max_stats: MinMaxStats) -> float:
+                min_max_stats: MinMaxStats) -> float:
     pb_c = math.log((parent.visit_count + config.pb_c_base + 1) /
-                  config.pb_c_base) + config.pb_c_init
+                config.pb_c_base) + config.pb_c_init
     pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
 
     prior_score = pb_c * child.prior
@@ -145,7 +176,7 @@ def backpropagate(search_path: List[Node], value: float, to_play: Player,
 # to encourage the search to explore new actions.
 def add_exploration_noise(config: MuZeroConfig, node: Node):
     actions = list(node.children.keys())
-    noise = numpy.random.dirichlet([config.root_dirichlet_alpha] * len(actions))
+    noise = np.random.dirichlet([config.root_dirichlet_alpha] * len(actions))
     frac = config.root_exploration_fraction
     for a, n in zip(actions, noise):
         node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
@@ -211,7 +242,19 @@ def scalar_loss(prediction, target) -> float:
     # MSE in board games, cross entropy between categorical values in Atari.
     return -1
 
+def softmax_sample(distribution, temperature: float):
+  if temperature == 0:
+    temperature = 1
+  distribution = numpy.array(distribution)**(1/temperature)
+  p_sum = distribution.sum()
+  sample_temp = distribution/p_sum
+  return 0, numpy.argmax(numpy.random.multinomial(1, sample_temp, 1))
 
+def launch_job(f, *args):
+  f(*args)
+
+def make_uniform_network():
+  return Network(make_connect4_config().action_space_size).to(device)
 config = make_connect4_config()
 vs_random_once = random_vs_random()
 print('random_vs_random = ', sorted(vs_random_once.items()), end='\n')

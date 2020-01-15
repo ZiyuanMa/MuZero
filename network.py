@@ -1,3 +1,4 @@
+from environment import Action
 import numpy as np
 import torch
 import torch.nn as nn
@@ -9,7 +10,8 @@ device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 filter_num = 16
 
-class NetworkOutput(dataclass):
+@dataclass
+class NetworkOutput:
     value: float
     reward: float
     policy_logits: Dict[Action, float]
@@ -106,11 +108,11 @@ class Prediction(nn.Module):
         return policy, value
 
 class Dynamics(nn.Module):
-    '''Abstruct state transition'''
+    '''Hidden state transition'''
     def __init__(self, rp_shape, act_shape):
         super().__init__()
         self.rp_shape = rp_shape
-        self.layer0 = nn.Sequential(
+        self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels=rp_shape[0] + act_shape[0],
                             out_channels=filter_num,
                             kernel_size=3,
@@ -119,69 +121,69 @@ class Dynamics(nn.Module):
             nn.BatchNorm2d(filter_num),
             nn.LeakyReLU()
         )
-        self.blocks = nn.ModuleList([ResidualBlock(filter_num) for _ in range(4)])
+        self.res_blocks = nn.ModuleList([ResidualBlock(filter_num) for _ in range(4)])
 
     def forward(self, rp, a):
         h = torch.cat([rp, a], dim=1)
-        h = self.layer0(h)
-        for block in self.blocks:
+        h = self.conv1(h)
+        for block in self.res_blocks:
             h = block(h)
         return h
 
 class Network(nn.Module):
 
-  def __init__(self, action_space_size: int):
-    super().__init__()
-    self.steps = 0
-    self.action_space_size = action_space_size
-    input_shape = (3, 8, 8)
-    rp_shape = (filter_num, *input_shape[1:])
-    self.representation = Representation(input_shape).to(device)
-    self.prediction = Prediction(action_space_size).to(device)
-    self.dynamics = Dynamics(rp_shape, (1, 8, 8)).to(device)
-    self.eval()
+    def __init__(self, action_space_size: int):
+        super().__init__()
+        self.steps = 0
+        self.action_space_size = action_space_size
+        input_shape = (3, 8, 8)
+        rp_shape = (filter_num, *input_shape[1:])
+        self.representation = Representation(input_shape).to(device)
+        self.prediction = Prediction(action_space_size).to(device)
+        self.dynamics = Dynamics(rp_shape, (1, 8, 8)).to(device)
+        self.eval()
   
-  def predict_initial_inference(self, x):    
-    assert x.ndim in (3, 4)
-    assert x.shape == (3, 8, 8) or x.shape[1:] == (3, 8, 8)
-    orig_x = x
-    if x.ndim == 3:
-        x = x.reshape(1, 3, 8, 8)
-    
-    x = torch.Tensor(x).to(device)
-    h = self.representation(x)
-    policy, value = self.prediction(h)
-    
-    if orig_x.ndim == 3:
-        return h[0], policy[0], value[0]
-    else:
-        return h, policy, value
+    def predict_initial_inference(self, x):    
+        assert x.ndim in (3, 4)
+        assert x.shape == (3, 8, 8) or x.shape[1:] == (3, 8, 8)
+        orig_x = x
+        if x.ndim == 3:
+            x = x.reshape(1, 3, 8, 8)
+        
+        x = torch.Tensor(x).to(device)
+        h = self.representation(x)
+        policy, value = self.prediction(h)
+        
+        if orig_x.ndim == 3:
+            return h[0], policy[0], value[0]
+        else:
+            return h, policy, value
 
-  def predict_recurrent_inference(self, x, a):
+    def predict_recurrent_inference(self, x, a):
 
-    if x.ndim == 3:
-        x = x.reshape(1, 3, 8, 8)
+        if x.ndim == 3:
+            x = x.reshape(1, 3, 8, 8)
 
-    a = torch.Tensor(a).to(device)
+        a = torch.Tensor(a).to(device)
 
-    g = self.dynamics(x, a)
-    policy, value = self.prediction(g)
-    
-    return g[0], policy[0], value[0]
+        g = self.dynamics(x, a)
+        policy, value = self.prediction(g)
+        
+        return g[0], policy[0], value[0]
 
-  def initial_inference(self, image) -> NetworkOutput:
-    # representation + prediction function
-    h, p, v = self.predict_initial_inference(image.astype(numpy.float32))
-    return NetworkOutput(v, 0, p, h)
+    def initial_inference(self, image) -> NetworkOutput:
+        # representation + prediction function
+        h, p, v = self.predict_initial_inference(image.astype(numpy.float32))
+        return NetworkOutput(v, 0, p, h)
 
-  def recurrent_inference(self, hidden_state, action) -> NetworkOutput:
-    # dynamics + prediction function
-    g, p, v = self.predict_recurrent_inference(hidden_state, action)
-    return NetworkOutput(v, 0, p, g) 
+    def recurrent_inference(self, hidden_state, action) -> NetworkOutput:
+        # dynamics + prediction function
+        g, p, v = self.predict_recurrent_inference(hidden_state, action)
+        return NetworkOutput(v, 0, p, g) 
 
-  def training_steps(self) -> int:
-    # How many steps / batches the network has been trained for.
-    return self.steps
+    def training_steps(self) -> int:
+        # How many steps / batches the network has been trained for.
+        return self.steps
 
 class SharedStorage:
 
