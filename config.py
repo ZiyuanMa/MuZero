@@ -115,7 +115,7 @@ def make_board_game_config(action_space_size: int, max_moves: int,
         discount=1.0,
         dirichlet_alpha=dirichlet_alpha,
         num_simulations=10,
-        batch_size=64,
+        batch_size=16,
         td_steps=max_moves,  # Always use Monte Carlo return.
         num_actors=1,
         lr_init=lr_init,

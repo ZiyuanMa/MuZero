@@ -173,7 +173,7 @@ class Network(nn.Module):
         for i in range(policy.size()[1]):
             p_dict[Action(i)] = policy[0][i].item()
 
-        return NetworkOutput(value.item(), 0, p_dict, hidden.detach())
+        return NetworkOutput(value.item(), 0, p_dict, hidden)
 
     def recurrent_inference(self, hidden_state: torch.Tensor, action: np.array) -> NetworkOutput:
         # dynamics + prediction function
@@ -183,7 +183,7 @@ class Network(nn.Module):
         for i in range(policy.size()[1]):
             p_dict[Action(i)] = policy[0][i].item()
 
-        return NetworkOutput(value.item(), 0, p_dict, hidden.detach())
+        return NetworkOutput(value.item(), 0, p_dict, hidden)
 
     def training_steps(self) -> int:
         # How many steps / batches the network has been trained for.

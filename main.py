@@ -56,7 +56,7 @@ def muzero(config: MuZeroConfig):
 # writing it to a shared replay buffer.
 def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
                  replay_buffer: ReplayBuffer):
-    while True:
+    for _ in range(30):
         network = storage.latest_network()
         game = play_game(config, network)
         replay_buffer.save_game(game)
@@ -215,13 +215,17 @@ def update_weights(optimizer: torch.optim, network: Network, batch,
 
     for image, actions, targets in batch:
         # Initial step, from the real observation.
-        value, reward, policy_logits, hidden_state = network.initial_inference(image)
-        predictions = [(1.0, value, reward, policy_logits)]
-
+        net_output = network.initial_inference(image)
+        # value, reward, policy_logits, hidden_state = network.initial_inference(image)
+        predictions = [(1.0, net_output.value, net_output.reward, net_output.policy_logits)]
+        hidden_state = net_output.hidden_state
     # Recurrent steps, from action and previous hidden state.
         for action in actions:
-            value, reward, policy_logits, hidden_state = network.recurrent_inference(hidden_state, action)
-            predictions.append((1.0 / len(actions), value, reward, policy_logits))
+            encoded_action = action.encode()
+            net_output = network.recurrent_inference(hidden_state, encoded_action)
+            # value, reward, policy_logits, hidden_state = network.recurrent_inference(hidden_state, action)
+            predictions.append((1.0 / len(actions), net_output.value, net_output.reward, net_output.policy_logits))
+            hidden_state = net_output.hidden_state
 
         for prediction, target in zip(predictions, targets):
             if(len(target[2]) > 0):
