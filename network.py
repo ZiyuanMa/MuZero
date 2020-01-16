@@ -1,4 +1,5 @@
 from environment import Action
+from config import *
 import numpy as np
 import torch
 import torch.nn as nn
@@ -15,26 +16,26 @@ class NetworkOutput:
     value: float
     reward: float
     policy_logits: Dict[Action, float]
-    hidden_state: List[float]
+    hidden_state: torch.Tensor
 
 class Flatten(nn.Module):
 
     def forward(self, input):
         return input.view(input.size(0), -1)
 
-class Conv(nn.Module):
-    def __init__(self, filters0, filters1, kernel_size, bn=False):
-        super().__init__()
-        self.conv = nn.Conv2d(filters0, filters1, kernel_size, stride=1, padding=kernel_size//2, bias=False)
-        self.bn = None
-        if bn:
-            self.bn = nn.BatchNorm2d(filters1)
+# class Conv(nn.Module):
+#     def __init__(self, filters0, filters1, kernel_size, bn=False):
+#         super().__init__()
+#         self.conv = nn.Conv2d(filters0, filters1, kernel_size, stride=1, padding=kernel_size//2, bias=False)
+#         self.bn = None
+#         if bn:
+#             self.bn = nn.BatchNorm2d(filters1)
 
-    def forward(self, x):
-        h = self.conv(x)
-        if self.bn is not None:
-            h = self.bn(h)
-        return h
+#     def forward(self, x):
+#         h = self.conv(x)
+#         if self.bn is not None:
+#             h = self.bn(h)
+#         return h
 
 class ResidualBlock(nn.Module):
     def __init__(self, filters):
@@ -48,7 +49,7 @@ class ResidualBlock(nn.Module):
         )
 
     def forward(self, x):
-        return F.leaky_relu(x + (self.conv(x)))
+        return F.leaky_relu(x + (self.block(x)))
 
 class Representation(nn.Module):
     # from board to hidden state
@@ -58,7 +59,7 @@ class Representation(nn.Module):
         self.board_size = self.input_shape[1] * self.input_shape[2]
 
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=self.input_shape[0],
+            nn.Conv2d(in_channels=4,
                             out_channels=filter_num,
                             kernel_size=3,
                             stride=1,
@@ -78,8 +79,8 @@ class Prediction(nn.Module):
     # use hidden state to predict value and policy
     def __init__(self, action_shape):
         super().__init__()
-        self.board_size = 42
-        self.action_size = action_shape
+        self.board_size = 64
+        self.action_size = 64
 
         self.policy_head = nn.Sequential(
             nn.Conv2d(filter_num, 2, 1),
@@ -87,7 +88,6 @@ class Prediction(nn.Module):
             nn.LeakyReLU(),
             nn.Flatten(),
             nn.Linear(self.board_size*2, self.board_size),
-            nn.Softmax()
         )
 
         self.value_head = nn.Sequential(
@@ -113,7 +113,7 @@ class Dynamics(nn.Module):
         super().__init__()
         self.rp_shape = rp_shape
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=rp_shape[0] + act_shape[0],
+            nn.Conv2d(in_channels=filter_num + act_shape[0],
                             out_channels=filter_num,
                             kernel_size=3,
                             stride=1,
@@ -144,42 +144,46 @@ class Network(nn.Module):
         self.eval()
   
     def predict_initial_inference(self, x):    
-        assert x.ndim in (3, 4)
-        assert x.shape == (3, 8, 8) or x.shape[1:] == (3, 8, 8)
-        orig_x = x
-        if x.ndim == 3:
-            x = x.reshape(1, 3, 8, 8)
+        assert x.ndim == 3
+        assert x.shape == (4, 8, 8)
+
+        x = x.reshape(1, 4, 8, 8)
         
-        x = torch.Tensor(x).to(device)
-        h = self.representation(x)
-        policy, value = self.prediction(h)
+        x = torch.from_numpy(x).to(device)
+        hidden = self.representation(x)
+        policy, value = self.prediction(hidden)
         
-        if orig_x.ndim == 3:
-            return h[0], policy[0], value[0]
-        else:
-            return h, policy, value
+        return hidden, policy, value
 
     def predict_recurrent_inference(self, x, a):
 
-        if x.ndim == 3:
-            x = x.reshape(1, 3, 8, 8)
-
-        a = torch.Tensor(a).to(device)
-
-        g = self.dynamics(x, a)
-        policy, value = self.prediction(g)
+        assert x.shape == (1, filter_num, 8, 8)
+        a = a.reshape(1,1,8,8)
+        a = torch.from_numpy(a).float().to(device)
+        hidden = self.dynamics(x, a)
+        policy, value = self.prediction(hidden)
         
-        return g[0], policy[0], value[0]
+        return hidden, policy, value
 
-    def initial_inference(self, image) -> NetworkOutput:
+    def initial_inference(self, image: np.array) -> NetworkOutput:
         # representation + prediction function
-        h, p, v = self.predict_initial_inference(image.astype(numpy.float32))
-        return NetworkOutput(v, 0, p, h)
+        hidden, policy, value = self.predict_initial_inference(image.astype(np.float32))
 
-    def recurrent_inference(self, hidden_state, action) -> NetworkOutput:
+        p_dict = dict()
+        for i in range(policy.size()[1]):
+            p_dict[Action(i)] = policy[0][i].item()
+
+        return NetworkOutput(value.item(), 0, p_dict, hidden.detach())
+
+    def recurrent_inference(self, hidden_state: torch.Tensor, action: np.array) -> NetworkOutput:
         # dynamics + prediction function
-        g, p, v = self.predict_recurrent_inference(hidden_state, action)
-        return NetworkOutput(v, 0, p, g) 
+        hidden, policy, value = self.predict_recurrent_inference(hidden_state, action)
+
+        p_dict = dict()
+        for i in range(policy.size()[1]):
+            p_dict[Action(i)] = policy[0][i].item()
+
+        return NetworkOutput(value.item(), 0, p_dict, hidden.detach())
 
     def training_steps(self) -> int:
         # How many steps / batches the network has been trained for.
@@ -195,14 +199,13 @@ class SharedStorage:
             return self._networks[max(self._networks.keys())]
         else:
             # policy -> uniform, value -> 0, reward -> 0
-            return make_uniform_network()
+            return Network(make_reversi_config().action_space_size).to(device)
 
     def old_network(self) -> Network:
         if self._networks:
             return self._networks[min(self._networks.keys())]
         else:
             # policy -> uniform, value -> 0, reward -> 0
-            return make_uniform_network()
-
+            return Network(make_reversi_config().action_space_size).to(device)
     def save_network(self, step: int, network: Network):
         self._networks[step] = network

@@ -65,7 +65,7 @@ def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
 # of the game is reached.
 def play_game(config: MuZeroConfig, network: Network) -> Game:
-    game = config.new_game()
+    game = Game(64, 1)
 
     while not game.terminal() and len(game.history) < config.max_moves:
         # At the root of the search tree we use the representation function to
@@ -89,6 +89,7 @@ def play_game(config: MuZeroConfig, network: Network) -> Game:
 # To decide on an action, we run N simulations, always starting at the root of
 # the search tree and traversing the tree according to the UCB formula until we
 # reach a leaf node.
+@torch.no_grad()
 def run_mcts(config: MuZeroConfig, root: Node, action_history: ActionHistory,
              network: Network):
     min_max_stats = MinMaxStats(config.known_bounds)
@@ -106,8 +107,9 @@ def run_mcts(config: MuZeroConfig, root: Node, action_history: ActionHistory,
         # Inside the search tree we use the dynamics function to obtain the next
         # hidden state given an action and the previous hidden state.
         parent = search_path[-2]
+        action_board = history.last_action().encode()
         network_output = network.recurrent_inference(parent.hidden_state,
-                                                history.last_action())
+                                                action_board)
         expand_node(node, history.to_play(), history.action_space(), network_output)
 
         backpropagate(search_path, network_output.value, history.to_play(),
@@ -121,7 +123,7 @@ def select_action(config: MuZeroConfig, num_moves: int, node: Node,
     ]
     t = config.visit_softmax_temperature_fn(
         num_moves=num_moves, training_steps=network.training_steps())
-    _, action = softmax_sample(visit_counts, t)
+    action = softmax_sample(visit_counts, t)
     return action
 
 
@@ -154,6 +156,8 @@ def expand_node(node: Node, to_play: Player, actions: List[Action],
     node.to_play = to_play
     node.hidden_state = network_output.hidden_state
     node.reward = network_output.reward
+
+    # softmax the policy values
     policy = {a: math.exp(network_output.policy_logits[a]) for a in actions}
     policy_sum = sum(policy.values())
     for action, p in policy.items():
@@ -190,10 +194,10 @@ def add_exploration_noise(config: MuZeroConfig, node: Node):
 
 def train_network(config: MuZeroConfig, storage: SharedStorage,
                   replay_buffer: ReplayBuffer):
-    network = Network()
-    learning_rate = config.lr_init * config.lr_decay_rate**(
-        tf.train.get_global_step() / config.lr_decay_steps)
-    optimizer = tf.train.MomentumOptimizer(learning_rate, config.momentum)
+    network = Network(config.action_space_size).to(device)
+
+    optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate,
+                            momentum=config.momentum)
 
     for i in range(config.training_steps):
         if i % config.checkpoint_interval == 0:
@@ -203,39 +207,36 @@ def train_network(config: MuZeroConfig, storage: SharedStorage,
     storage.save_network(config.training_steps, network)
 
 
-def update_weights(optimizer: tf.train.Optimizer, network: Network, batch,
+def update_weights(optimizer: torch.optim, network: Network, batch,
                    weight_decay: float):
-    loss = 0
+    network.train()
+    
+    p_loss, v_loss = 0, 0
+
     for image, actions, targets in batch:
-    # Initial step, from the real observation.
-        value, reward, policy_logits, hidden_state = network.initial_inference(
-            image)
+        # Initial step, from the real observation.
+        value, reward, policy_logits, hidden_state = network.initial_inference(image)
         predictions = [(1.0, value, reward, policy_logits)]
 
     # Recurrent steps, from action and previous hidden state.
-    for action in actions:
-        value, reward, policy_logits, hidden_state = network.recurrent_inference(
-            hidden_state, action)
-        predictions.append((1.0 / len(actions), value, reward, policy_logits))
+        for action in actions:
+            value, reward, policy_logits, hidden_state = network.recurrent_inference(hidden_state, action)
+            predictions.append((1.0 / len(actions), value, reward, policy_logits))
 
-        hidden_state = tf.scale_gradient(hidden_state, 0.5)
+        for prediction, target in zip(predictions, targets):
+            if(len(target[2]) > 0):
+                _ , value, reward, policy_logits = prediction
+                target_value, target_reward, target_policy = target
 
-    for prediction, target in zip(predictions, targets):
-        gradient_scale, value, reward, policy_logits = prediction
-        target_value, target_reward, target_policy = target
-
-        l = (
-            scalar_loss(value, target_value) +
-            scalar_loss(reward, target_reward) +
-            tf.nn.softmax_cross_entropy_with_logits(
-                logits=policy_logits, labels=target_policy))
-
-        loss += tf.scale_gradient(l, gradient_scale)
-
-    for weights in network.get_weights():
-        loss += weight_decay * tf.nn.l2_loss(weights)
-
-    optimizer.minimize(loss)
+                p_loss += torch.sum(-torch.Tensor(np.array(target_policy)).to(device) * torch.log(policy_logits))
+                v_loss += torch.sum((torch.Tensor([target_value]).to(device) - value) ** 2)
+  
+    optimizer.zero_grad()    
+    total_loss = (p_loss + v_loss)
+    total_loss.backward()
+    optimizer.step()
+    network.steps += 1
+    print('p_loss %f v_loss %f' % (p_loss / len(batch), v_loss / len(batch)))
 
 
 def scalar_loss(prediction, target) -> float:
@@ -243,19 +244,22 @@ def scalar_loss(prediction, target) -> float:
     return -1
 
 def softmax_sample(distribution, temperature: float):
-  if temperature == 0:
-    temperature = 1
-  distribution = numpy.array(distribution)**(1/temperature)
-  p_sum = distribution.sum()
-  sample_temp = distribution/p_sum
-  return 0, numpy.argmax(numpy.random.multinomial(1, sample_temp, 1))
-
+    visits = [i[0] for i in distribution]
+    actions = [i[1] for i in distribution]
+    if temperature == 0:
+        return actions[visits.index(max(visits))]
+    elif temperature == 1:
+        visits_sum = sum(visits)
+        visits_prob = [i/visits_sum for i in visits]
+        return np.random.choice(actions, 1, visits_prob).item()
+    else:
+        raise NotImplementedError
 def launch_job(f, *args):
-  f(*args)
+    f(*args)
 
 def make_uniform_network():
-  return Network(make_connect4_config().action_space_size).to(device)
-config = make_connect4_config()
-vs_random_once = random_vs_random()
-print('random_vs_random = ', sorted(vs_random_once.items()), end='\n')
+    return Network(make_reversi_config().action_space_size).to(device)
+config = make_reversi_config()
+# vs_random_once = random_vs_random()
+# print('random_vs_random = ', sorted(vs_random_once.items()), end='\n')
 network = muzero(config)
