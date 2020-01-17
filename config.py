@@ -93,32 +93,31 @@ class MuZeroConfig(object):
         self.lr_decay_rate = 0.1
         self.lr_decay_steps = lr_decay_steps
 
+def visit_softmax_temperature(num_moves, training_steps):
+    if num_moves < 6:
+        return 1.0
+    else:
+        return 0.0  # Play according to the max.
 
+def make_reversi_config() -> MuZeroConfig:
 
-def make_board_game_config(action_space_size: int, max_moves: int,
-                           dirichlet_alpha: float,
-                           lr_init: float) -> MuZeroConfig:
-
-    def visit_softmax_temperature(num_moves, training_steps):
-        if num_moves < 6:
-            return 1.0
-        else:
-            return 0.0  # Play according to the max.
+    # def visit_softmax_temperature(num_moves, training_steps):
+    #     if num_moves < 6:
+    #         return 1.0
+    #     else:
+    #         return 0.0  # Play according to the max.
 
     return MuZeroConfig(
-        action_space_size=action_space_size,
-        max_moves=max_moves,
+        action_space_size=65,
+        max_moves=60,
         discount=1.0,
-        dirichlet_alpha=dirichlet_alpha,
+        dirichlet_alpha=0.03,
         num_simulations=50,
         batch_size=16,
-        td_steps=max_moves,  # Always use Monte Carlo return.
+        td_steps=60,  # Always use Monte Carlo return.
         num_actors=1,
-        lr_init=lr_init,
+        lr_init=0.01,
         lr_decay_steps=400e3,
         visit_softmax_temperature_fn=visit_softmax_temperature,
         known_bounds=KnownBounds(-1, 1))
 
-def make_reversi_config() -> MuZeroConfig:
-    return make_board_game_config(
-        action_space_size=65, max_moves=60, dirichlet_alpha=0.03, lr_init=0.01)

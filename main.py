@@ -5,8 +5,10 @@ from config import *
 from typing import Dict, List, Optional
 import math
 import numpy as np
+import torch.multiprocessing as mp
 import enum
 import collections
+from tqdm import tqdm
 MAXIMUM_FLOAT_VALUE = float('inf')
 
 KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
@@ -56,10 +58,30 @@ def muzero(config: MuZeroConfig):
 # writing it to a shared replay buffer.
 def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
                  replay_buffer: ReplayBuffer):
-    for _ in range(30):
-        network = storage.latest_network()
-        game = play_game(config, network)
-        replay_buffer.save_game(game)
+    # for _ in tqdm(range(30)):
+    #     network = storage.latest_network()
+    #     game = play_game(config, network)
+    #     replay_buffer.save_game(game)
+
+    network = storage.latest_network()
+    network.share_memory()
+    # with mp.Pool(2) as p:
+    #     for _ in tqdm(range(30)):
+    #         p.apply(play_game, args=(config, network))
+
+    with mp.Pool(2) as p:
+        pbar = tqdm(total=30)
+        def update(ret):
+            pbar.update()
+            replay_buffer.save_game(ret)
+
+        for _ in range(30):
+            p.apply_async(play_game, args=(config, network), callback= update)
+
+
+        p.close()
+        p.join()
+        pbar.close()
 
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
@@ -211,7 +233,7 @@ def train_network(config: MuZeroConfig, storage: SharedStorage,
 def update_weights(optimizer: torch.optim, network: Network, batch,
                    weight_decay: float):
     network.train()
-    
+    optimizer.zero_grad()
     p_loss, v_loss = 0, 0
 
     for image, actions, targets in batch:
@@ -233,10 +255,10 @@ def update_weights(optimizer: torch.optim, network: Network, batch,
                 _ , value, reward, policy_logits = prediction
                 target_value, target_reward, target_policy = target
                 
-                p_loss += torch.mean(-torch.Tensor([target_policy]).to(device) * policy_logits)
+                p_loss += torch.sum(-torch.Tensor([target_policy]).to(device) * policy_logits)
                 v_loss += torch.sum((torch.Tensor([target_value]).to(device) - value) ** 2)
   
-    optimizer.zero_grad()    
+  
     total_loss = (p_loss + v_loss)
     total_loss.backward()
     optimizer.step()
@@ -264,7 +286,10 @@ def launch_job(f, *args):
 
 def make_uniform_network():
     return Network(make_reversi_config().action_space_size).to(device)
-config = make_reversi_config()
-# vs_random_once = random_vs_random()
-# print('random_vs_random = ', sorted(vs_random_once.items()), end='\n')
-network = muzero(config)
+
+if __name__ == '__main__':
+    mp.set_start_method('spawn')
+    config = make_reversi_config()
+    # vs_random_once = random_vs_random()
+    # print('random_vs_random = ', sorted(vs_random_once.items()), end='\n')
+    network = muzero(config)

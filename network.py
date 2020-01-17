@@ -8,7 +8,9 @@ import torch.optim as optim
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = True
+device = 'cpu'
 filter_num = 16
 
 @dataclass
