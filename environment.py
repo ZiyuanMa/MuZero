@@ -28,7 +28,9 @@ class Action():
     def encode(self):
         # encode to netword input 
         board = np.zeros((8, 8))
-        board[self.index//8][self.index%8] = 1
+        if self.index < 64:
+            row, column = self.index // 8, self.index % 8
+            board[row][column] = 1
         return board
 
 class Node:
@@ -85,26 +87,19 @@ class ActionHistory:
 class Environment:
     # The environment MuZero is interacting with
     def __init__(self):
-        self.board = np.zeros([8,8])
-        self.board[3][3] = 1
-        self.board[4][4] = 1
-        self.board[3][4] = -1
-        self.board[4][3] = -1
+        self.board = init_board()
         self.turn = 1
         self.done = False
         self.winner = None  # type: Winner
         self.resigned = False
         self.actions = [Action(row*8+column) for row, column in available_pos(self.board, self.turn)]
     def reset(self):
-        self.board = np.zeros([8,8])
-        self.board[3][3] = 1
-        self.board[4][4] = 1
-        self.board[3][4] = -1
-        self.board[4][3] = -1
+        self.board = init_board()
         self.turn = 1
         self.done = False
         self.winner = None
         self.resigned = False
+        self.actions = [Action(row*8+column) for row, column in available_pos(self.board, self.turn)]
         return self
     # def update(self, board):
     #     self.board = np.copy(board)
@@ -115,8 +110,8 @@ class Environment:
     #     return self
 
 
-    def turn_n(self):
-        return np.count_nonzero(self.board!=0)
+    # def turn_n(self):
+    #     return np.count_nonzero(self.board!=0)
 
     def player_turn(self):
         return self.turn
@@ -128,13 +123,12 @@ class Environment:
         self.board[row][column] = self.turn
 
         self.turn = -self.turn
-
         self.actions = [Action(row*8+column) for row, column in available_pos(self.board, self.turn)]
+        
         if not self.actions:
-            self.turn = -self.turn
-            self.actions = [Action(row*8+column) for row, column in available_pos(self.board, self.turn)]
-            if not self.actions:
-                self.turn = 0
+            if available_pos(self.board, -self.turn):
+                self.actions = [Action(64)]
+            else:
                 self.done = True
 
         reward = 0
@@ -171,6 +165,9 @@ class Game:
 
     def legal_actions(self) -> List[Action]:
         return self.environment.legal_actions()
+
+    # def legal_action_indices(self) -> List[int]:
+
 
     def apply(self, action: Action):
         reward = self.environment.step(action)
@@ -224,8 +221,7 @@ class Game:
                 value += reward * self.discount**i  # pytype: disable=unsupported-operands
 
             if current_index < len(self.root_values):
-                targets.append((value, self.rewards[current_index],
-                        self.child_visits[current_index]))
+                targets.append((value, self.rewards[current_index], self.child_visits[current_index]))
             else:
                 # States past the end of games are treated as absorbing states.
                 targets.append((0, 0, []))
@@ -262,6 +258,5 @@ class ReplayBuffer:
 
     def sample_position(self, game) -> int:
         # Sample position from game either uniformly or according to some priority.
-        print(len(game.history))
         return np.random.choice(range(len(game.history)))
 

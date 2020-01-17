@@ -3,8 +3,6 @@
 round = 15
 episodes = 10000
 epoch = 3
-memory_size = 3     # store 3 rounds game 30000 games
-update_rate = 0.65
 min_visit_times = 3
 
 
@@ -95,8 +93,6 @@ class MuZeroConfig(object):
         self.lr_decay_rate = 0.1
         self.lr_decay_steps = lr_decay_steps
 
-    def new_game(self):
-        return Game(self.action_space_size, self.discount)
 
 
 def make_board_game_config(action_space_size: int, max_moves: int,
@@ -114,7 +110,7 @@ def make_board_game_config(action_space_size: int, max_moves: int,
         max_moves=max_moves,
         discount=1.0,
         dirichlet_alpha=dirichlet_alpha,
-        num_simulations=10,
+        num_simulations=50,
         batch_size=16,
         td_steps=max_moves,  # Always use Monte Carlo return.
         num_actors=1,
@@ -125,4 +121,4 @@ def make_board_game_config(action_space_size: int, max_moves: int,
 
 def make_reversi_config() -> MuZeroConfig:
     return make_board_game_config(
-        action_space_size=64, max_moves=60, dirichlet_alpha=0.03, lr_init=0.01)
+        action_space_size=65, max_moves=60, dirichlet_alpha=0.03, lr_init=0.01)

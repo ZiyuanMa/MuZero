@@ -19,20 +19,20 @@ Player = enum.Enum("Player", "black white")
 
 class MinMaxStats(object):
 
-  """A class that holds the min-max values of the tree."""
-  def __init__(self, known_bounds: Optional[KnownBounds]):
-    self.maximum = known_bounds.max if known_bounds else -MAXIMUM_FLOAT_VALUE
-    self.minimum = known_bounds.min if known_bounds else MAXIMUM_FLOAT_VALUE
+    """A class that holds the min-max values of the tree."""
+    def __init__(self, known_bounds: Optional[KnownBounds]):
+        self.maximum = known_bounds.max if known_bounds else -MAXIMUM_FLOAT_VALUE
+        self.minimum = known_bounds.min if known_bounds else MAXIMUM_FLOAT_VALUE
 
-  def update(self, value: float):
-    self.maximum = max(self.maximum, value)
-    self.minimum = min(self.minimum, value)
+    def update(self, value: float):
+        self.maximum = max(self.maximum, value)
+        self.minimum = min(self.minimum, value)
 
-  def normalize(self, value: float) -> float:
-    if self.maximum > self.minimum:
-      # We normalize only when we have set the maximum and minimum values.
-      return (value - self.minimum) / (self.maximum - self.minimum)
-    return value
+    def normalize(self, value: float) -> float:
+        if self.maximum > self.minimum:
+            # We normalize only when we have set the maximum and minimum values.
+            return (value - self.minimum) / (self.maximum - self.minimum)
+        return value
 
 
 # MuZero training is split into two independent parts: Network training and
@@ -64,16 +64,17 @@ def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
 # of the game is reached.
+@torch.no_grad()
 def play_game(config: MuZeroConfig, network: Network) -> Game:
-    game = Game(64, 1)
+    game = Game(65, 1)
 
     while not game.terminal() and len(game.history) < config.max_moves:
         # At the root of the search tree we use the representation function to
         # obtain a hidden state given the current observation.
         root = Node(0)
         current_observation = game.make_image(-1)
-        expand_node(root, game.to_play(), game.legal_actions(),
-                network.initial_inference(current_observation))
+        net_output = network.initial_inference(current_observation)
+        expand_node(root, game.to_play(), game.legal_actions(), net_output)
         add_exploration_noise(config, root)
 
         # We then run a Monte Carlo Tree Search using only action sequences and the
@@ -158,7 +159,7 @@ def expand_node(node: Node, to_play: Player, actions: List[Action],
     node.reward = network_output.reward
 
     # softmax the policy values
-    policy = {a: math.exp(network_output.policy_logits[a]) for a in actions}
+    policy = {a: math.exp(network_output.policy_logits[0][a.index].item()) for a in actions}
     policy_sum = sum(policy.values())
     for action, p in policy.items():
         node.children[action] = Node(p / policy_sum)
@@ -193,7 +194,7 @@ def add_exploration_noise(config: MuZeroConfig, node: Node):
 
 
 def train_network(config: MuZeroConfig, storage: SharedStorage,
-                  replay_buffer: ReplayBuffer):
+                replay_buffer: ReplayBuffer):
     network = Network(config.action_space_size).to(device)
 
     optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate,
@@ -231,8 +232,8 @@ def update_weights(optimizer: torch.optim, network: Network, batch,
             if(len(target[2]) > 0):
                 _ , value, reward, policy_logits = prediction
                 target_value, target_reward, target_policy = target
-
-                p_loss += torch.sum(-torch.Tensor(np.array(target_policy)).to(device) * torch.log(policy_logits))
+                
+                p_loss += torch.mean(-torch.Tensor([target_policy]).to(device) * policy_logits)
                 v_loss += torch.sum((torch.Tensor([target_value]).to(device) - value) ** 2)
   
     optimizer.zero_grad()    

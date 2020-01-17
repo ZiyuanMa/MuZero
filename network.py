@@ -15,7 +15,7 @@ filter_num = 16
 class NetworkOutput:
     value: float
     reward: float
-    policy_logits: Dict[Action, float]
+    policy_logits: torch.Tensor
     hidden_state: torch.Tensor
 
 class Flatten(nn.Module):
@@ -80,14 +80,13 @@ class Prediction(nn.Module):
     def __init__(self, action_shape):
         super().__init__()
         self.board_size = 64
-        self.action_size = 64
 
         self.policy_head = nn.Sequential(
             nn.Conv2d(filter_num, 2, 1),
             nn.BatchNorm2d(2),
             nn.LeakyReLU(),
             nn.Flatten(),
-            nn.Linear(self.board_size*2, self.board_size),
+            nn.Linear(self.board_size*2, self.board_size+1),
         )
 
         self.value_head = nn.Sequential(
@@ -113,7 +112,7 @@ class Dynamics(nn.Module):
         super().__init__()
         self.rp_shape = rp_shape
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=filter_num + act_shape[0],
+            nn.Conv2d(in_channels=filter_num + 1,
                             out_channels=filter_num,
                             kernel_size=3,
                             stride=1,
@@ -169,21 +168,13 @@ class Network(nn.Module):
         # representation + prediction function
         hidden, policy, value = self.predict_initial_inference(image.astype(np.float32))
 
-        p_dict = dict()
-        for i in range(policy.size()[1]):
-            p_dict[Action(i)] = policy[0][i].item()
-
-        return NetworkOutput(value.item(), 0, p_dict, hidden)
+        return NetworkOutput(value, 0, policy, hidden)
 
     def recurrent_inference(self, hidden_state: torch.Tensor, action: np.array) -> NetworkOutput:
         # dynamics + prediction function
         hidden, policy, value = self.predict_recurrent_inference(hidden_state, action)
 
-        p_dict = dict()
-        for i in range(policy.size()[1]):
-            p_dict[Action(i)] = policy[0][i].item()
-
-        return NetworkOutput(value.item(), 0, p_dict, hidden)
+        return NetworkOutput(value, 0, policy, hidden)
 
     def training_steps(self) -> int:
         # How many steps / batches the network has been trained for.
