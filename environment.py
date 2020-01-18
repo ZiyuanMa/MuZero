@@ -166,9 +166,6 @@ class Game:
     def legal_actions(self) -> List[Action]:
         return self.environment.legal_actions()
 
-    # def legal_action_indices(self) -> List[int]:
-
-
     def apply(self, action: Action):
         reward = self.environment.step(action)
         reward = reward if self.environment.turn % 2 != 0 and reward == 1 else -reward

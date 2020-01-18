@@ -69,7 +69,7 @@ def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
     #     for _ in tqdm(range(30)):
     #         p.apply(play_game, args=(config, network))
 
-    with mp.Pool(2) as p:
+    with mp.Pool(4) as p:
         pbar = tqdm(total=30)
         def update(ret):
             pbar.update()
@@ -255,7 +255,7 @@ def update_weights(optimizer: torch.optim, network: Network, batch,
                 _ , value, reward, policy_logits = prediction
                 target_value, target_reward, target_policy = target
                 
-                p_loss += torch.sum(-torch.Tensor([target_policy]).to(device) * policy_logits)
+                p_loss += torch.sum(-torch.Tensor([target_policy]).to(device) * torch.log(policy_logits))
                 v_loss += torch.sum((torch.Tensor([target_value]).to(device) - value) ** 2)
   
   

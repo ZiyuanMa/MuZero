@@ -89,6 +89,7 @@ class Prediction(nn.Module):
             nn.LeakyReLU(),
             nn.Flatten(),
             nn.Linear(self.board_size*2, self.board_size+1),
+            nn.Softmax(dim=1)
         )
 
         self.value_head = nn.Sequential(
