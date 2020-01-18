@@ -1,5 +1,6 @@
 from reversi import *
 from config import *
+import random
 import numpy as np
 import torch
 from dataclasses import dataclass
@@ -250,7 +251,7 @@ class ReplayBuffer:
         self.buffer.append(game)
 
     def sample_batch(self, num_unroll_steps: int, td_steps: int):
-        games = [self.sample_game() for _ in range(self.batch_size)]
+        games = self.sample_game()
         game_pos = [(g, self.sample_position(g)) for g in games]
         return [(g.make_image(i), g.history[i:i + num_unroll_steps],
             g.make_target(i, num_unroll_steps, td_steps))
@@ -258,8 +259,13 @@ class ReplayBuffer:
 
     def sample_game(self) -> Game:
         # Sample game from buffer either uniformly or according to some priority.
-        return np.random.choice(self.buffer)
-
+        games = []
+        count = self.batch_size
+        while count >= len(self.buffer):
+            games.extend(self.buffer.copy())
+            count -= len(self.buffer)
+        games.extend(random.sample(self.buffer, count))
+        return games
     def sample_position(self, game) -> int:
         # Sample position from game either uniformly or according to some priority.
         return np.random.choice(range(len(game.history)))

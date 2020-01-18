@@ -228,17 +228,22 @@ def train_network(config: MuZeroConfig, storage: SharedStorage,
         if i % config.checkpoint_interval == 0:
             storage.save_network(i, network)
         batch = replay_buffer.sample_batch(config.num_unroll_steps, config.td_steps)
-        update_weights(optimizer, network, batch, config.weight_decay)
+        data_set = Dataset(batch)
+        data_loader = DataLoader(dataset=data_set,
+                            num_workers=4,
+                            batch_size=64,
+                            shuffle=True)
+        update_weights(optimizer, network, data_loader, config.weight_decay)
     storage.save_network(config.training_steps, network)
 
 
-def update_weights(optimizer: torch.optim, network: Network, batch,
+def update_weights(optimizer: torch.optim, network: Network, data_loader,
                    weight_decay: float):
     network.train()
     optimizer.zero_grad()
     p_loss, v_loss = 0, 0
 
-    for image, actions, targets in batch:
+    for image, actions, targets in data_loader:
         # Initial step, from the real observation.
         net_output = network.initial_inference(image)
         # value, reward, policy_logits, hidden_state = network.initial_inference(image)

@@ -114,7 +114,7 @@ def print_board(board):
     print("     -----------------------------------------------------------------\n\n")
 
 def init_board():
-    board = np.zeros([8,8])
+    board = np.zeros([8,8], dtype=np.float32)
     board[3][3] = 1
     board[4][4] = 1
     board[3][4] = -1

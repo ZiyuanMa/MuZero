@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
@@ -12,6 +13,30 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = True
 device = 'cpu'
 filter_num = 16
+
+class Dataset(Dataset):
+
+    def __init__(self, data):
+        image, actions, targets
+        self.images = [image for image, _, _ in data]
+        self.actions = [[action.encode() for action in action_list] for _, action_list, _ in data]
+        self.targets = [target_list for _, _, target_list in data]
+        self.len = len(data)
+
+    def __getitem__(self, index):
+
+        return self.images[index], self.actions[index], self.targets[index]
+
+
+    def __len__(self):
+        return self.len
+
+    # def transform(self, narray):
+    #     if random.choice([True, False]):
+            
+    #         return torch.from_numpy(np.rot90(narray, 2).copy()).float().view(2,8,8)
+    #     else:
+    #         return torch.from_numpy(narray).float().view(2,8,8)
 
 @dataclass
 class NetworkOutput:
@@ -119,7 +144,7 @@ class Dynamics(nn.Module):
             h = block(h)
         return h
 
-class Network(nn.Module):
+class Network():
 
     def __init__(self, action_space_size: int):
         super().__init__()
