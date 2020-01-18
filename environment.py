@@ -1,6 +1,7 @@
 from reversi import *
 from config import *
 import numpy as np
+import torch
 from dataclasses import dataclass
 from typing import List, Optional
 # class Action(object):
@@ -26,18 +27,18 @@ class Action():
         return self.index // 8, self.index % 8
 
     def encode(self):
-        # encode to netword input 
-        board = np.zeros((8, 8))
+        # encode to tensor
+        board = torch.zeros([1,1,8,8])
         if self.index < 64:
             row, column = self.index // 8, self.index % 8
-            board[row][column] = 1
+            board[0][0][row][column] = 1
         return board
 
 class Node:
 
-    def __init__(self, prior: float):
+    def __init__(self, prior: float, to_play: int):
         self.visit_count = 0
-        self.to_play = 0
+        self.to_play = to_play
         self.prior = prior
         self.value_sum = 0
         self.children = {}
@@ -51,6 +52,9 @@ class Node:
         if self.visit_count == 0:
             return 0
         return self.value_sum / self.visit_count
+    
+    def get_to_play(self):
+        return self.to_play
 
 class ActionHistory:
     # def __init__(self, history: List[Action], action_space_size: int):
@@ -187,21 +191,24 @@ class Game:
         # layer 2: board with black stone
         # layer 3: binary board for it is white's turn
         # layer 4: binary board for it is black's turn
+        image = np.empty([1,4,8,8], dtype=np.float32)
         o = Environment().reset()
 
         for current_index in range(0, state_index):
             o.step(self.history[current_index])
 
         board = o.get_board()
-        white_board = np.expand_dims(board==1, axis=0)
-        black_board = np.expand_dims(board==-1, axis=0)
+        image[0,0,:,:] = board==1
+        image[0,1,:,:] = board==-1
         turn_board = np.zeros((2,board.shape[0], board.shape[1]))
         if o.player_turn == 1:
             turn_board[0,:,:] = 1
         elif o.player_turn == -1:
             turn_board[1,:,:] = 1
         
-        return np.concatenate((white_board, black_board, turn_board))
+        image[0,2:,:,:] = turn_board
+
+        return torch.from_numpy(image)
 
     def make_target(self, state_index: int, num_unroll_steps: int, td_steps: int):
         # The value target is the discounted root value of the search tree N steps
@@ -225,7 +232,7 @@ class Game:
         return targets
 
     def to_play(self) -> int:
-        return self.environment.player_turn
+        return self.environment.player_turn()
 
     def action_history(self) -> ActionHistory:
         return ActionHistory(self.history, self.action_space_size)

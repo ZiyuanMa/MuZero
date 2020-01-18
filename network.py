@@ -15,7 +15,7 @@ filter_num = 16
 
 @dataclass
 class NetworkOutput:
-    value: float
+    value: torch.Tensor
     reward: float
     policy_logits: torch.Tensor
     hidden_state: torch.Tensor
@@ -25,19 +25,6 @@ class Flatten(nn.Module):
     def forward(self, input):
         return input.view(input.size(0), -1)
 
-# class Conv(nn.Module):
-#     def __init__(self, filters0, filters1, kernel_size, bn=False):
-#         super().__init__()
-#         self.conv = nn.Conv2d(filters0, filters1, kernel_size, stride=1, padding=kernel_size//2, bias=False)
-#         self.bn = None
-#         if bn:
-#             self.bn = nn.BatchNorm2d(filters1)
-
-#     def forward(self, x):
-#         h = self.conv(x)
-#         if self.bn is not None:
-#             h = self.bn(h)
-#         return h
 
 class ResidualBlock(nn.Module):
     def __init__(self, filters):
@@ -138,46 +125,24 @@ class Network(nn.Module):
         super().__init__()
         self.steps = 0
         self.action_space_size = action_space_size
-        input_shape = (3, 8, 8)
+        input_shape = (4, 8, 8)
         rp_shape = (filter_num, *input_shape[1:])
         self.representation = Representation(input_shape).to(device)
         self.prediction = Prediction(action_space_size).to(device)
         self.dynamics = Dynamics(rp_shape, (1, 8, 8)).to(device)
         self.eval()
-  
-    def predict_initial_inference(self, x):    
-        assert x.ndim == 3
-        assert x.shape == (4, 8, 8)
 
-        x = x.reshape(1, 4, 8, 8)
-        
-        x = torch.from_numpy(x).to(device)
-        hidden = self.representation(x)
-        policy, value = self.prediction(hidden)
-        
-        return hidden, policy, value
-
-    def predict_recurrent_inference(self, x, a):
-
-        assert x.shape == (1, filter_num, 8, 8)
-        a = a.reshape(1,1,8,8)
-        a = torch.from_numpy(a).float().to(device)
-        hidden = self.dynamics(x, a)
-        policy, value = self.prediction(hidden)
-        
-        return hidden, policy, value
-
-    def initial_inference(self, image: np.array) -> NetworkOutput:
+    def initial_inference(self, image: torch.Tensor):
         # representation + prediction function
-        hidden, policy, value = self.predict_initial_inference(image.astype(np.float32))
+        hidden = self.representation(image)
+        policy, value = self.prediction(hidden)
+        return NetworkOutput(value, torch.Tensor([[0]]), policy, hidden)
 
-        return NetworkOutput(value, 0, policy, hidden)
-
-    def recurrent_inference(self, hidden_state: torch.Tensor, action: np.array) -> NetworkOutput:
+    def recurrent_inference(self, hidden_state: torch.Tensor, action: torch.Tensor):
         # dynamics + prediction function
-        hidden, policy, value = self.predict_recurrent_inference(hidden_state, action)
-
-        return NetworkOutput(value, 0, policy, hidden)
+        hidden = self.dynamics(hidden_state, action)
+        policy, value = self.prediction(hidden)
+        return NetworkOutput(value, torch.Tensor([[0]]), policy, hidden)
 
     def training_steps(self) -> int:
         # How many steps / batches the network has been trained for.

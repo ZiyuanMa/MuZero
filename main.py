@@ -58,30 +58,30 @@ def muzero(config: MuZeroConfig):
 # writing it to a shared replay buffer.
 def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
                  replay_buffer: ReplayBuffer):
-    # for _ in tqdm(range(30)):
-    #     network = storage.latest_network()
-    #     game = play_game(config, network)
-    #     replay_buffer.save_game(game)
+    for _ in tqdm(range(30)):
+        network = storage.latest_network()
+        game = play_game(config, network)
+        replay_buffer.save_game(game)
 
-    network = storage.latest_network()
-    network.share_memory()
+    # network = storage.latest_network()
+    # network.share_memory()
     # with mp.Pool(2) as p:
     #     for _ in tqdm(range(30)):
     #         p.apply(play_game, args=(config, network))
 
-    with mp.Pool(4) as p:
-        pbar = tqdm(total=30)
-        def update(ret):
-            pbar.update()
-            replay_buffer.save_game(ret)
+    # with mp.Pool(4) as p:
+    #     pbar = tqdm(total=30)
+    #     def update(ret):
+    #         pbar.update()
+    #         replay_buffer.save_game(ret)
 
-        for _ in range(30):
-            p.apply_async(play_game, args=(config, network), callback= update)
+    #     for _ in range(30):
+    #         p.apply_async(play_game, args=(config, network), callback= update)
 
 
-        p.close()
-        p.join()
-        pbar.close()
+    #     p.close()
+    #     p.join()
+    #     pbar.close()
 
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
@@ -93,10 +93,10 @@ def play_game(config: MuZeroConfig, network: Network) -> Game:
     while not game.terminal() and len(game.history) < config.max_moves:
         # At the root of the search tree we use the representation function to
         # obtain a hidden state given the current observation.
-        root = Node(0)
+        root = Node(0, game.to_play())
         current_observation = game.make_image(-1)
         net_output = network.initial_inference(current_observation)
-        expand_node(root, game.to_play(), game.legal_actions(), net_output)
+        expand_node(root, game.legal_actions(), net_output)
         add_exploration_noise(config, root)
 
         # We then run a Monte Carlo Tree Search using only action sequences and the
@@ -122,18 +122,17 @@ def run_mcts(config: MuZeroConfig, root: Node, action_history: ActionHistory,
         node = root
         search_path = [node]
 
+        # choose node based on score if it already exists in tree
         while node.expanded():
             action, node = select_child(config, node, min_max_stats)
             history.add_action(action)
             search_path.append(node)
 
-        # Inside the search tree we use the dynamics function to obtain the next
-        # hidden state given an action and the previous hidden state.
+        # go untill a unexpanded node, expand by using recurrent inference then backup
         parent = search_path[-2]
-        action_board = history.last_action().encode()
-        network_output = network.recurrent_inference(parent.hidden_state,
-                                                action_board)
-        expand_node(node, history.to_play(), history.action_space(), network_output)
+        action_tensor = history.last_action().encode()
+        network_output = network.recurrent_inference(parent.hidden_state, action_tensor)
+        expand_node(node, history.action_space(), network_output)
 
         backpropagate(search_path, network_output.value, history.to_play(),
                     config.discount, min_max_stats)
@@ -144,8 +143,12 @@ def select_action(config: MuZeroConfig, num_moves: int, node: Node,
     visit_counts = [
         (child.visit_count, action) for action, child in node.children.items()
     ]
-    t = config.visit_softmax_temperature_fn(
-        num_moves=num_moves, training_steps=network.training_steps())
+
+    if num_moves < 6:
+        t = 1.0
+    else:
+        t = 0.0  # Play according to the max.
+
     action = softmax_sample(visit_counts, t)
     return action
 
@@ -174,21 +177,20 @@ def ucb_score(config: MuZeroConfig, parent: Node, child: Node,
 
 # We expand a node using the value, reward and policy prediction obtained from
 # the neural network.
-def expand_node(node: Node, to_play: Player, actions: List[Action],
+def expand_node(node: Node, actions: List[Action],
                 network_output: NetworkOutput):
-    node.to_play = to_play
     node.hidden_state = network_output.hidden_state
     node.reward = network_output.reward
 
-    # softmax the policy values
-    policy = {a: math.exp(network_output.policy_logits[0][a.index].item()) for a in actions}
+    # filter illegal actions only for first expansion of mcts
+    policy = {a: network_output.policy_logits[0][a.index].item() for a in actions}
     policy_sum = sum(policy.values())
     for action, p in policy.items():
-        node.children[action] = Node(p / policy_sum)
+        node.children[action] = Node(p / policy_sum, -node.to_play)
 
 
-# At the end of a simulation, we propagate the evaluation all the way up the
-# tree to the root.
+# At the end of a simulation, we propagate the evaluation all the way up to the
+# tree of the root.
 def backpropagate(search_path: List[Node], value: float, to_play: Player,
                   discount: float, min_max_stats: MinMaxStats):
     for node in search_path:
@@ -244,8 +246,8 @@ def update_weights(optimizer: torch.optim, network: Network, batch,
         hidden_state = net_output.hidden_state
     # Recurrent steps, from action and previous hidden state.
         for action in actions:
-            encoded_action = action.encode()
-            net_output = network.recurrent_inference(hidden_state, encoded_action)
+            action_tensor = action.encode()
+            net_output = network.recurrent_inference(hidden_state, action_tensor)
             # value, reward, policy_logits, hidden_state = network.recurrent_inference(hidden_state, action)
             predictions.append((1.0 / len(actions), net_output.value, net_output.reward, net_output.policy_logits))
             hidden_state = net_output.hidden_state
@@ -255,8 +257,8 @@ def update_weights(optimizer: torch.optim, network: Network, batch,
                 _ , value, reward, policy_logits = prediction
                 target_value, target_reward, target_policy = target
                 
-                p_loss += torch.sum(-torch.Tensor([target_policy]).to(device) * torch.log(policy_logits))
-                v_loss += torch.sum((torch.Tensor([target_value]).to(device) - value) ** 2)
+                p_loss += torch.mean(torch.sum(-torch.Tensor([target_policy]) * torch.log(policy_logits), dim=1))
+                v_loss += torch.mean(torch.sum((torch.Tensor([target_value]) - value) ** 2, dim=1))
   
   
     total_loss = (p_loss + v_loss)
@@ -281,6 +283,7 @@ def softmax_sample(distribution, temperature: float):
         return np.random.choice(actions, 1, visits_prob).item()
     else:
         raise NotImplementedError
+
 def launch_job(f, *args):
     f(*args)
 
