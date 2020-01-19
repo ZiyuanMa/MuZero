@@ -221,7 +221,7 @@ def train_network(storage: SharedStorage, replay_buffer: ReplayBuffer):
                             batch_size=config.mini_batch_size,
                             shuffle=True)
         update_weights(optimizer, network, data_loader, config.weight_decay)
-    storage.save_network(config.training_steps, network)
+    storage.save_network(network.steps, network)
 
 
 def update_weights(optimizer: torch.optim, network: Network, data_loader,

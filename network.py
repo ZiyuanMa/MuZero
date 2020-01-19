@@ -195,3 +195,11 @@ class SharedStorage:
             return Network(config.action_space_size)
     def save_network(self, step: int, network: Network):
         self._networks[step] = network
+
+    def save_network_dict(self, optimizer: torch.optim):
+        max_step = max(self._networks.keys())
+        torch.save({
+                'net': self._networks[max_step].state_dict(),
+                'optim': optimizer.state_dict(),
+                'step': max_step,
+        }, './model'+str(max_step)+'.pth')
