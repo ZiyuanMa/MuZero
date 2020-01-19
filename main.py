@@ -40,10 +40,10 @@ def muzero():
     storage = SharedStorage()
     replay_buffer = ReplayBuffer()
 
-    for _ in range(config.num_actors):
-        launch_job(run_selfplay, storage, replay_buffer)
+    for _ in range(config.training_steps//config.checkpoint_interval):
+        run_selfplay(storage, replay_buffer)
 
-    train_network(storage, replay_buffer)
+        train_network(storage, replay_buffer)
 
     return storage.latest_network()
 
@@ -51,10 +51,10 @@ def muzero():
 # snapshot, produces a game and makes it available to the training job by
 # writing it to a shared replay buffer.
 def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
-    for _ in tqdm(range(30)):
-        network = storage.latest_network()
-        game = play_game(network)
-        replay_buffer.save_game(game)
+    # for _ in tqdm(range(30)):
+    #     network = storage.latest_network()
+    #     game = play_game(network)
+    #     replay_buffer.save_game(game)
 
     # network = storage.latest_network()
     # network.share_memory()
@@ -64,13 +64,13 @@ def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
 
     network = storage.latest_network()
     network.share_memory()
-    with mp.Pool(8) as p:
-        pbar = tqdm(total=8)
+    with mp.Pool(4) as p:
+        pbar = tqdm(total=config.episodes)
         def update(ret):
             pbar.update()
             replay_buffer.save_game(ret)
 
-        for _ in range(8):
+        for _ in range(config.episodes):
             p.apply_async(play_game, args=(network), callback= update)
         p.close()
         p.join()
@@ -81,7 +81,7 @@ def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
 # of the game is reached.
 @torch.no_grad()
 def play_game(network: Network) -> Game:
-    game = Game(65, 1)
+    game = Game()
 
     while not game.terminal() and len(game.history) < config.max_moves+10:
         # At the root of the search tree we use the representation function to
@@ -211,14 +211,14 @@ def train_network(storage: SharedStorage, replay_buffer: ReplayBuffer):
 
     optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
 
-    for i in range(config.training_steps):
+    for i in range(config.checkpoint_interval):
         if i % config.checkpoint_interval == 0:
             storage.save_network(i, network)
         batch = replay_buffer.sample_batch(config.num_unroll_steps, config.td_steps)
         data_set = Dataset(batch)
         data_loader = DataLoader(dataset=data_set,
                             num_workers=4,
-                            batch_size=64,
+                            batch_size=config.mini_batch_size,
                             shuffle=True)
         update_weights(optimizer, network, data_loader, config.weight_decay)
     storage.save_network(config.training_steps, network)

@@ -157,8 +157,8 @@ class Game:
         self.rewards = []
         self.child_visits = []
         self.root_values = []
-        self.action_space_size = action_space_size
-        self.discount = discount
+        self.action_space_size = config.action_space_size
+        self.discount = config.discount
 
     def terminal(self) -> bool:
         return self.environment.done
@@ -251,9 +251,9 @@ class ReplayBuffer:
     def sample_batch(self, num_unroll_steps: int, td_steps: int):
         games = self.sample_game()
         game_pos = [(g, self.sample_position(g)) for g in games]
-        return [(g.make_image(i), g.history[i:i + num_unroll_steps],
-            g.make_target(i, num_unroll_steps, td_steps))
-            for (g, i) in game_pos]
+        return [(g.make_image(pos), g.history[pos:pos + num_unroll_steps],
+            g.make_target(pos, num_unroll_steps, td_steps))
+            for (g, pos) in game_pos]
 
     def sample_game(self) -> Game:
         # Sample game from buffer either uniformly or according to some priority.
@@ -266,5 +266,5 @@ class ReplayBuffer:
         return games
     def sample_position(self, game) -> int:
         # Sample position from game either uniformly or according to some priority.
-        return np.random.choice(range(len(game.history)-4))
+        return np.random.choice(range(len(game.history)-config.num_unroll_steps))
 
