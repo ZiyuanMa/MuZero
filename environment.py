@@ -93,7 +93,7 @@ class Environment:
     # The environment MuZero is interacting with
     def __init__(self):
         self.board = init_board()
-        self.turn = 1
+        self.turn = 1 # 1 for white and -1 for black
         self.done = False
         self.winner = None  # type: Winner
         self.resigned = False
@@ -124,8 +124,9 @@ class Environment:
 
 
     def step(self, action: Action):
-        row, column = action.get_coord()
-        self.board[row][column] = self.turn
+        if action.index != 64:
+            row, column = action.get_coord()
+            set_position(self.board, row, column, self.turn)
 
         self.turn = -self.turn
         self.actions = [Action(row*8+column) for row, column in available_pos(self.board, self.turn)]
@@ -141,9 +142,9 @@ class Environment:
             white_score = np.count_nonzero(self.board==1)
             black_score = np.count_nonzero(self.board==-1)
             if white_score > black_score:
-                reward = 1
+                reward = 1 if -self.turn == 1 else -1
             elif white_score < black_score:
-                reward = -1
+                reward = 1 if -self.turn == -1 else -1
         return reward
 
     def legal_actions(self):
@@ -173,7 +174,8 @@ class Game:
 
     def apply(self, action: Action):
         reward = self.environment.step(action)
-        reward = reward if self.environment.turn % 2 != 0 and reward == 1 else -reward
+        # reward = reward if self.environment.turn % 2 != 0 and reward == 1 else -reward
+        
         self.rewards.append(reward)
         self.history.append(action)
 
@@ -222,8 +224,9 @@ class Game:
             else:
                 value = 0
 
+            l = self.rewards[current_index:bootstrap_index]
             for i, reward in enumerate(self.rewards[current_index:bootstrap_index]):
-                value += reward * self.discount**i  # pytype: disable=unsupported-operands
+                value += reward * self.discount**i * -1**i # pytype: disable=unsupported-operands
 
             if current_index < len(self.root_values):
                 targets.append((value, self.rewards[current_index], self.child_visits[current_index]))
@@ -268,5 +271,5 @@ class ReplayBuffer:
         return games
     def sample_position(self, game) -> int:
         # Sample position from game either uniformly or according to some priority.
-        return np.random.choice(range(len(game.history)-5))
+        return np.random.choice(range(len(game.history)-4))
 

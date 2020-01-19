@@ -14,7 +14,7 @@ import typing
 from typing import Dict, List, Optional
 import enum
 
-import numpy as np
+import numpy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -40,8 +40,8 @@ num_filters = 2
 num_blocks = 8
 
 class MinMaxStats(object):
-
   """A class that holds the min-max values of the tree."""
+
   def __init__(self, known_bounds: Optional[KnownBounds]):
     self.maximum = known_bounds.max if known_bounds else -MAXIMUM_FLOAT_VALUE
     self.minimum = known_bounds.min if known_bounds else MAXIMUM_FLOAT_VALUE
@@ -120,7 +120,7 @@ def make_board_game_config(action_space_size: int, max_moves: int,
                            lr_init: float) -> MuZeroConfig:
 
   def visit_softmax_temperature(num_moves, training_steps):
-    if num_moves < 6:
+    if num_moves < 30:
       return 1.0
     else:
       return 0.0  # Play according to the max.
@@ -139,9 +139,9 @@ def make_board_game_config(action_space_size: int, max_moves: int,
       visit_softmax_temperature_fn=visit_softmax_temperature,
       known_bounds=KnownBounds(-1, 1))
 
-def make_reversi_config() -> MuZeroConfig:
+def make_connect4_config() -> MuZeroConfig:
   return make_board_game_config(
-      action_space_size=64, max_moves=60, dirichlet_alpha=0.03, lr_init=0.01)
+      action_space_size=7, max_moves=20, dirichlet_alpha=0.03, lr_init=0.01)
 
 class Action(object):
 
@@ -152,13 +152,10 @@ class Action(object):
     return self.index
 
   def __eq__(self, other):
-    return self.index == other.index
+    return self.index == other
 
   def __gt__(self, other):
-    return self.index > other.index
-
-class Player(object):
-    pass
+    return self.index > other
 
 class Node(object):
 
@@ -212,22 +209,18 @@ class Environment(object):
   """The environment MuZero is interacting with."""
 
   def __init__(self):
-      self.board = np.zeros([8,8])
-      self.board[3][3] = 1
-      self.board[4][4] = 1
-      self.board[3][4] = -1
-      self.board[4][3] = -1
+      self.board = None
       self.turn = 0
       self.done = False
       self.winner = None  # type: Winner
       self.resigned = False
 
   def reset(self):
-      self.board = np.zeros([8,8])
-      self.board[3][3] = 1
-      self.board[4][4] = 1
-      self.board[3][4] = -1
-      self.board[4][3] = -1
+      self.board = []
+      for i in range(6):
+          self.board.append([])
+          for j in range(7): # pylint: disable=unused-variable
+              self.board[i].append(' ')
       self.turn = 0
       self.done = False
       self.winner = None
@@ -249,7 +242,7 @@ class Environment(object):
               if self.board[i][j] != ' ':
                   turn += 1
 
-      return np.count_nonzero(self.board==0)
+      return turn
 
   def player_turn(self):
       if self.turn % 2 == 0:
@@ -258,7 +251,6 @@ class Environment(object):
           return Player.black
 
   def step(self, action):
-      
       for i in range(6):
           if self.board[i][action] == ' ':
               self.board[i][action] = ('X' if self.player_turn() == Player.white else 'O')
@@ -509,7 +501,7 @@ class Game(object):
         value = self.root_values[bootstrap_index] * self.discount**td_steps
       else:
         value = 0
-
+    
       for i, reward in enumerate(self.rewards[current_index:bootstrap_index]):
         value += reward * self.discount**i  # pytype: disable=unsupported-operands
 

@@ -62,12 +62,14 @@ def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
     #     game = play_game(config, network)
     #     replay_buffer.save_game(game)
 
-    network = storage.latest_network()
-    network.share_memory()
+    # network = storage.latest_network()
+    # network.share_memory()
     # with mp.Pool(2) as p:
     #     for _ in tqdm(range(30)):
     #         p.apply(play_game, args=(config, network))
 
+    network = storage.latest_network()
+    network.share_memory()
     with mp.Pool(8) as p:
         pbar = tqdm(total=8)
         def update(ret):
@@ -89,7 +91,7 @@ def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
 def play_game(config: MuZeroConfig, network: Network) -> Game:
     game = Game(65, 1)
 
-    while not game.terminal() and len(game.history) < config.max_moves:
+    while not game.terminal() and len(game.history) < config.max_moves+10:
         # At the root of the search tree we use the representation function to
         # obtain a hidden state given the current observation.
         root = Node(0, game.to_play())
