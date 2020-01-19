@@ -113,7 +113,7 @@ def make_reversi_config() -> MuZeroConfig:
         discount=1.0,
         dirichlet_alpha=0.03,
         num_simulations=50,
-        batch_size=16,
+        batch_size=64,
         td_steps=60,  # Always use Monte Carlo return.
         num_actors=1,
         lr_init=0.01,

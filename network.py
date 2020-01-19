@@ -17,16 +17,16 @@ filter_num = 16
 class Dataset(Dataset):
 
     def __init__(self, data):
-        image, actions, targets
         self.images = [image for image, _, _ in data]
         self.actions = [[action.encode() for action in action_list] for _, action_list, _ in data]
-        self.targets = [target_list for _, _, target_list in data]
+        self.target_values = [[torch.tensor([value], dtype=torch.float) for value, _, _ in target_list]for _, _, target_list in data]
+        self.target_rewards = [[torch.tensor([reward], dtype=torch.float) for _, reward, _ in target_list]for _, _, target_list in data]
+        self.target_policies = [[torch.tensor(policy, dtype=torch.float) for _, _, policy in target_list]for _, _, target_list in data]
         self.len = len(data)
 
     def __getitem__(self, index):
 
-        return self.images[index], self.actions[index], self.targets[index]
-
+        return self.images[index], self.actions[index], self.target_values[index], self.target_rewards[index], self.target_policies[index]
 
     def __len__(self):
         return self.len
@@ -144,7 +144,7 @@ class Dynamics(nn.Module):
             h = block(h)
         return h
 
-class Network():
+class Network(nn.Module):
 
     def __init__(self, action_space_size: int):
         super().__init__()
@@ -157,13 +157,19 @@ class Network():
         self.dynamics = Dynamics(rp_shape, (1, 8, 8)).to(device)
         self.eval()
 
-    def initial_inference(self, image: torch.Tensor):
+    def initial_inference(self, image: torch.FloatTensor):
         # representation + prediction function
+        if image.ndim == 3:
+            image = image.unsqueeze(0)
         hidden = self.representation(image)
         policy, value = self.prediction(hidden)
         return NetworkOutput(value, torch.Tensor([[0]]), policy, hidden)
 
-    def recurrent_inference(self, hidden_state: torch.Tensor, action: torch.Tensor):
+    def recurrent_inference(self, hidden_state: torch.FloatTensor, action: torch.FloatTensor):
+        if hidden_state.ndim == 3:
+            hidden_state = hidden_state.unsqueeze(0)
+        if action.ndim == 3:
+            action = action.unsqueeze(0)
         # dynamics + prediction function
         hidden = self.dynamics(hidden_state, action)
         policy, value = self.prediction(hidden)
@@ -183,13 +189,13 @@ class SharedStorage:
             return self._networks[max(self._networks.keys())]
         else:
             # policy -> uniform, value -> 0, reward -> 0
-            return Network(make_reversi_config().action_space_size).to(device)
+            return Network(make_reversi_config().action_space_size)
 
     def old_network(self) -> Network:
         if self._networks:
             return self._networks[min(self._networks.keys())]
         else:
             # policy -> uniform, value -> 0, reward -> 0
-            return Network(make_reversi_config().action_space_size).to(device)
+            return Network(make_reversi_config().action_space_size)
     def save_network(self, step: int, network: Network):
         self._networks[step] = network

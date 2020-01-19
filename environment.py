@@ -29,10 +29,10 @@ class Action():
 
     def encode(self):
         # encode to tensor
-        board = torch.zeros([1,1,8,8])
+        board = torch.zeros([1,8,8])
         if self.index < 64:
             row, column = self.index // 8, self.index % 8
-            board[0][0][row][column] = 1
+            board[0][row][column] = 1
         return board
 
 class Node:
@@ -192,22 +192,22 @@ class Game:
         # layer 2: board with black stone
         # layer 3: binary board for it is white's turn
         # layer 4: binary board for it is black's turn
-        image = np.empty([1,4,8,8], dtype=np.float32)
+        image = np.empty([4,8,8], dtype=np.float32)
         o = Environment().reset()
 
         for current_index in range(0, state_index):
             o.step(self.history[current_index])
 
         board = o.get_board()
-        image[0,0,:,:] = board==1
-        image[0,1,:,:] = board==-1
+        image[0,:,:] = board==1
+        image[1,:,:] = board==-1
         turn_board = np.zeros((2,board.shape[0], board.shape[1]))
         if o.player_turn == 1:
             turn_board[0,:,:] = 1
         elif o.player_turn == -1:
             turn_board[1,:,:] = 1
         
-        image[0,2:,:,:] = turn_board
+        image[2:,:,:] = turn_board
 
         return torch.from_numpy(image)
 
@@ -268,5 +268,5 @@ class ReplayBuffer:
         return games
     def sample_position(self, game) -> int:
         # Sample position from game either uniformly or according to some priority.
-        return np.random.choice(range(len(game.history)))
+        return np.random.choice(range(len(game.history)-5))
 

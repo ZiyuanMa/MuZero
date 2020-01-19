@@ -1,4 +1,3 @@
-
 from environment import *
 from network import *
 from config import *
@@ -58,30 +57,30 @@ def muzero(config: MuZeroConfig):
 # writing it to a shared replay buffer.
 def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
                  replay_buffer: ReplayBuffer):
-    for _ in tqdm(range(30)):
-        network = storage.latest_network()
-        game = play_game(config, network)
-        replay_buffer.save_game(game)
+    # for _ in tqdm(range(30)):
+    #     network = storage.latest_network()
+    #     game = play_game(config, network)
+    #     replay_buffer.save_game(game)
 
-    # network = storage.latest_network()
-    # network.share_memory()
+    network = storage.latest_network()
+    network.share_memory()
     # with mp.Pool(2) as p:
     #     for _ in tqdm(range(30)):
     #         p.apply(play_game, args=(config, network))
 
-    # with mp.Pool(4) as p:
-    #     pbar = tqdm(total=30)
-    #     def update(ret):
-    #         pbar.update()
-    #         replay_buffer.save_game(ret)
+    with mp.Pool(8) as p:
+        pbar = tqdm(total=8)
+        def update(ret):
+            pbar.update()
+            replay_buffer.save_game(ret)
 
-    #     for _ in range(30):
-    #         p.apply_async(play_game, args=(config, network), callback= update)
+        for _ in range(8):
+            p.apply_async(play_game, args=(config, network), callback= update)
 
 
-    #     p.close()
-    #     p.join()
-    #     pbar.close()
+        p.close()
+        p.join()
+        pbar.close()
 
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
@@ -219,7 +218,7 @@ def add_exploration_noise(config: MuZeroConfig, node: Node):
 
 def train_network(config: MuZeroConfig, storage: SharedStorage,
                 replay_buffer: ReplayBuffer):
-    network = Network(config.action_space_size).to(device)
+    network = Network(config.action_space_size)
 
     optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate,
                             momentum=config.momentum)
@@ -243,7 +242,7 @@ def update_weights(optimizer: torch.optim, network: Network, data_loader,
     optimizer.zero_grad()
     p_loss, v_loss = 0, 0
 
-    for image, actions, targets in data_loader:
+    for image, actions, target_values, target_rewards, target_policies in data_loader:
         # Initial step, from the real observation.
         net_output = network.initial_inference(image)
         # value, reward, policy_logits, hidden_state = network.initial_inference(image)
@@ -251,26 +250,26 @@ def update_weights(optimizer: torch.optim, network: Network, data_loader,
         hidden_state = net_output.hidden_state
     # Recurrent steps, from action and previous hidden state.
         for action in actions:
-            action_tensor = action.encode()
-            net_output = network.recurrent_inference(hidden_state, action_tensor)
+            # action_tensor = action.encode()
+            net_output = network.recurrent_inference(hidden_state, action)
             # value, reward, policy_logits, hidden_state = network.recurrent_inference(hidden_state, action)
             predictions.append((1.0 / len(actions), net_output.value, net_output.reward, net_output.policy_logits))
             hidden_state = net_output.hidden_state
 
-        for prediction, target in zip(predictions, targets):
-            if(len(target[2]) > 0):
-                _ , value, reward, policy_logits = prediction
-                target_value, target_reward, target_policy = target
-                
-                p_loss += torch.mean(torch.sum(-torch.Tensor([target_policy]) * torch.log(policy_logits), dim=1))
-                v_loss += torch.mean(torch.sum((torch.Tensor([target_value]) - value) ** 2, dim=1))
+        for prediction, target_value, target_reward, target_policy in zip(predictions, target_values, target_rewards, target_policies):
+            # if(len(target[2]) > 0):
+            _ , value, reward, policy_logits = prediction
+            
+            # target_policy = torch.stack(target_policy).float()
+            p_loss += torch.mean(torch.sum(-target_policy * torch.log(policy_logits), dim=1))
+            v_loss += torch.mean(torch.sum((target_value - value) ** 2, dim=1))
   
   
     total_loss = (p_loss + v_loss)
     total_loss.backward()
     optimizer.step()
     network.steps += 1
-    print('p_loss %f v_loss %f' % (p_loss / len(batch), v_loss / len(batch)))
+    print('p_loss %f v_loss %f' % (p_loss, v_loss))
 
 
 def scalar_loss(prediction, target) -> float:
