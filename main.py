@@ -78,8 +78,6 @@ def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
 
         for _ in range(8):
             p.apply_async(play_game, args=(config, network), callback= update)
-
-
         p.close()
         p.join()
         pbar.close()
@@ -96,6 +94,7 @@ def play_game(config: MuZeroConfig, network: Network) -> Game:
         # obtain a hidden state given the current observation.
         root = Node(0, game.to_play())
         current_observation = game.make_image(-1)
+        current_observation = torch.from_numpy(current_observation)
         net_output = network.initial_inference(current_observation)
         expand_node(root, game.legal_actions(), net_output)
         add_exploration_noise(config, root)
@@ -131,8 +130,9 @@ def run_mcts(config: MuZeroConfig, root: Node, action_history: ActionHistory,
 
         # go untill a unexpanded node, expand by using recurrent inference then backup
         parent = search_path[-2]
-        action_tensor = history.last_action().encode()
-        network_output = network.recurrent_inference(parent.hidden_state, action_tensor)
+        encoded_action = history.last_action().encode()
+        encoded_action = torch.from_numpy(encoded_action)
+        network_output = network.recurrent_inference(parent.hidden_state, encoded_action)
         expand_node(node, history.action_space(), network_output)
 
         backpropagate(search_path, network_output.value, history.to_play(),

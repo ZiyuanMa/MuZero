@@ -8,17 +8,13 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from dataclasses import dataclass
 from typing import Dict, List, Optional
-device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = True
-device = 'cpu'
 filter_num = 16
 
 class Dataset(Dataset):
 
     def __init__(self, data):
-        self.images = [image for image, _, _ in data]
-        self.actions = [[action.encode() for action in action_list] for _, action_list, _ in data]
+        self.images = [torch.from_numpy(image) for image, _, _ in data]
+        self.actions = [[torch.from_numpy(action.encode()) for action in action_list] for _, action_list, _ in data]
         self.target_values = [[torch.tensor([value], dtype=torch.float) for value, _, _ in target_list]for _, _, target_list in data]
         self.target_rewards = [[torch.tensor([reward], dtype=torch.float) for _, reward, _ in target_list]for _, _, target_list in data]
         self.target_policies = [[torch.tensor(policy, dtype=torch.float) for _, _, policy in target_list]for _, _, target_list in data]
@@ -152,9 +148,9 @@ class Network(nn.Module):
         self.action_space_size = action_space_size
         input_shape = (4, 8, 8)
         rp_shape = (filter_num, *input_shape[1:])
-        self.representation = Representation(input_shape).to(device)
-        self.prediction = Prediction(action_space_size).to(device)
-        self.dynamics = Dynamics(rp_shape, (1, 8, 8)).to(device)
+        self.representation = Representation(input_shape)
+        self.prediction = Prediction(action_space_size)
+        self.dynamics = Dynamics(rp_shape, (1, 8, 8))
         self.eval()
 
     def initial_inference(self, image: torch.FloatTensor):

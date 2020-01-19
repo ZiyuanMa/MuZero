@@ -1,8 +1,7 @@
-from reversi import *
+from reversi import available_pos, set_position, init_board
 from config import *
 import random
 import numpy as np
-import torch
 from dataclasses import dataclass
 from typing import List, Optional
 # class Action(object):
@@ -24,12 +23,9 @@ from typing import List, Optional
 class Action():
     index: int
 
-    def get_coord(self):
-        return self.index // 8, self.index % 8
-
     def encode(self):
         # encode to tensor
-        board = torch.zeros([1,8,8])
+        board = np.zeros([1,8,8], dtype=np.float32)
         if self.index < 64:
             row, column = self.index // 8, self.index % 8
             board[0][row][column] = 1
@@ -120,12 +116,10 @@ class Environment:
 
     def player_turn(self):
         return self.turn
-    # def get_action(self):
-
 
     def step(self, action: Action):
         if action.index != 64:
-            row, column = action.get_coord()
+            row, column = action.index//8, action.index%8
             set_position(self.board, row, column, self.turn)
 
         self.turn = -self.turn
@@ -211,7 +205,7 @@ class Game:
         
         image[2:,:,:] = turn_board
 
-        return torch.from_numpy(image)
+        return image
 
     def make_target(self, state_index: int, num_unroll_steps: int, td_steps: int):
         # The value target is the discounted root value of the search tree N steps
@@ -232,7 +226,8 @@ class Game:
                 targets.append((value, self.rewards[current_index], self.child_visits[current_index]))
             else:
                 # States past the end of games are treated as absorbing states.
-                targets.append((0, 0, []))
+                # targets.append((0, 0, []))
+                raise RuntimeError('out of end of game')
         return targets
 
     def to_play(self) -> int:
