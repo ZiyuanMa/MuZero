@@ -1,5 +1,5 @@
 from reversi import available_pos, set_position, init_board
-from config import *
+import config
 import random
 import numpy as np
 from dataclasses import dataclass
@@ -238,7 +238,7 @@ class Game:
 
 class ReplayBuffer:
 
-    def __init__(self, config: MuZeroConfig):
+    def __init__(self):
         self.window_size = config.window_size
         self.batch_size = config.batch_size
         self.buffer = []

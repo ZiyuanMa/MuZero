@@ -1,5 +1,5 @@
 from environment import Action
-from config import *
+import config
 import numpy as np
 import torch
 import torch.nn as nn
@@ -185,13 +185,13 @@ class SharedStorage:
             return self._networks[max(self._networks.keys())]
         else:
             # policy -> uniform, value -> 0, reward -> 0
-            return Network(make_reversi_config().action_space_size)
+            return Network(config.action_space_size)
 
     def old_network(self) -> Network:
         if self._networks:
             return self._networks[min(self._networks.keys())]
         else:
             # policy -> uniform, value -> 0, reward -> 0
-            return Network(make_reversi_config().action_space_size)
+            return Network(config.action_space_size)
     def save_network(self, step: int, network: Network):
         self._networks[step] = network

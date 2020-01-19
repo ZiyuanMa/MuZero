@@ -1,6 +1,6 @@
 from environment import *
 from network import *
-from config import *
+import config
 from typing import Dict, List, Optional
 import math
 import numpy as np
@@ -12,11 +12,6 @@ MAXIMUM_FLOAT_VALUE = float('inf')
 
 KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
 
-# noinspection PyArgumentList
-Winner = enum.Enum("Winner", "black white draw")
-
-# noinspection PyArgumentList
-Player = enum.Enum("Player", "black white")
 
 class MinMaxStats(object):
 
@@ -41,32 +36,31 @@ class MinMaxStats(object):
 # These two parts only communicate by transferring the latest network checkpoint
 # from the training to the self-play, and the finished games from the self-play
 # to the training.
-def muzero(config: MuZeroConfig):
+def muzero():
     storage = SharedStorage()
-    replay_buffer = ReplayBuffer(config)
+    replay_buffer = ReplayBuffer()
 
     for _ in range(config.num_actors):
-        launch_job(run_selfplay, config, storage, replay_buffer)
+        launch_job(run_selfplay, storage, replay_buffer)
 
-    train_network(config, storage, replay_buffer)
+    train_network(storage, replay_buffer)
 
     return storage.latest_network()
 
 # Each self-play job is independent of all others; it takes the latest network
 # snapshot, produces a game and makes it available to the training job by
 # writing it to a shared replay buffer.
-def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
-                 replay_buffer: ReplayBuffer):
-    # for _ in tqdm(range(30)):
-    #     network = storage.latest_network()
-    #     game = play_game(config, network)
-    #     replay_buffer.save_game(game)
+def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
+    for _ in tqdm(range(30)):
+        network = storage.latest_network()
+        game = play_game(network)
+        replay_buffer.save_game(game)
 
     # network = storage.latest_network()
     # network.share_memory()
     # with mp.Pool(2) as p:
     #     for _ in tqdm(range(30)):
-    #         p.apply(play_game, args=(config, network))
+    #         p.apply(play_game, args=(network))
 
     network = storage.latest_network()
     network.share_memory()
@@ -77,7 +71,7 @@ def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
             replay_buffer.save_game(ret)
 
         for _ in range(8):
-            p.apply_async(play_game, args=(config, network), callback= update)
+            p.apply_async(play_game, args=(network), callback= update)
         p.close()
         p.join()
         pbar.close()
@@ -86,7 +80,7 @@ def run_selfplay(config: MuZeroConfig, storage: SharedStorage,
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
 # of the game is reached.
 @torch.no_grad()
-def play_game(config: MuZeroConfig, network: Network) -> Game:
+def play_game(network: Network) -> Game:
     game = Game(65, 1)
 
     while not game.terminal() and len(game.history) < config.max_moves+10:
@@ -97,12 +91,12 @@ def play_game(config: MuZeroConfig, network: Network) -> Game:
         current_observation = torch.from_numpy(current_observation)
         net_output = network.initial_inference(current_observation)
         expand_node(root, game.legal_actions(), net_output)
-        add_exploration_noise(config, root)
+        add_exploration_noise(root)
 
         # We then run a Monte Carlo Tree Search using only action sequences and the
         # model learned by the network.
-        run_mcts(config, root, game.action_history(), network)
-        action = select_action(config, len(game.history), root, network)
+        run_mcts(root, game.action_history(), network)
+        action = select_action(len(game.history), root, network)
         game.apply(action)
         game.store_search_statistics(root)
     return game
@@ -113,8 +107,7 @@ def play_game(config: MuZeroConfig, network: Network) -> Game:
 # the search tree and traversing the tree according to the UCB formula until we
 # reach a leaf node.
 @torch.no_grad()
-def run_mcts(config: MuZeroConfig, root: Node, action_history: ActionHistory,
-             network: Network):
+def run_mcts(root: Node, action_history: ActionHistory, network: Network):
     min_max_stats = MinMaxStats(config.known_bounds)
 
     for _ in range(config.num_simulations):
@@ -124,7 +117,7 @@ def run_mcts(config: MuZeroConfig, root: Node, action_history: ActionHistory,
 
         # choose node based on score if it already exists in tree
         while node.expanded():
-            action, node = select_child(config, node, min_max_stats)
+            action, node = select_child(node, min_max_stats)
             history.add_action(action)
             search_path.append(node)
 
@@ -139,8 +132,7 @@ def run_mcts(config: MuZeroConfig, root: Node, action_history: ActionHistory,
                     config.discount, min_max_stats)
 
 
-def select_action(config: MuZeroConfig, num_moves: int, node: Node,
-                  network: Network):
+def select_action(num_moves: int, node: Node, network: Network):
     visit_counts = [
         (child.visit_count, action) for action, child in node.children.items()
     ]
@@ -155,18 +147,16 @@ def select_action(config: MuZeroConfig, num_moves: int, node: Node,
 
 
 # Select the child with the highest UCB score.
-def select_child(config: MuZeroConfig, node: Node,
-                 min_max_stats: MinMaxStats):
+def select_child(node: Node, min_max_stats: MinMaxStats):
     _, action, child = max(
-        (ucb_score(config, node, child, min_max_stats), action,
+        (ucb_score(node, child, min_max_stats), action,
         child) for action, child in node.children.items())
     return action, child
 
 
 # The score for a node is based on its value, plus an exploration bonus based on
 # the prior.
-def ucb_score(config: MuZeroConfig, parent: Node, child: Node,
-                min_max_stats: MinMaxStats) -> float:
+def ucb_score(parent: Node, child: Node, min_max_stats: MinMaxStats) -> float:
     pb_c = math.log((parent.visit_count + config.pb_c_base + 1) /
                 config.pb_c_base) + config.pb_c_init
     pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
@@ -178,8 +168,7 @@ def ucb_score(config: MuZeroConfig, parent: Node, child: Node,
 
 # We expand a node using the value, reward and policy prediction obtained from
 # the neural network.
-def expand_node(node: Node, actions: List[Action],
-                network_output: NetworkOutput):
+def expand_node(node: Node, actions: List[Action], network_output: NetworkOutput):
     node.hidden_state = network_output.hidden_state
     node.reward = network_output.reward
 
@@ -192,8 +181,7 @@ def expand_node(node: Node, actions: List[Action],
 
 # At the end of a simulation, we propagate the evaluation all the way up to the
 # tree of the root.
-def backpropagate(search_path: List[Node], value: float, to_play: Player,
-                  discount: float, min_max_stats: MinMaxStats):
+def backpropagate(search_path: List[Node], value: float, to_play: int, discount: float, min_max_stats: MinMaxStats):
     for node in search_path:
         node.value_sum += value if node.to_play == to_play else -value
         node.visit_count += 1
@@ -204,7 +192,7 @@ def backpropagate(search_path: List[Node], value: float, to_play: Player,
 
 # At the start of each search, we add dirichlet noise to the prior of the root
 # to encourage the search to explore new actions.
-def add_exploration_noise(config: MuZeroConfig, node: Node):
+def add_exploration_noise(node: Node):
     actions = list(node.children.keys())
     noise = np.random.dirichlet([config.root_dirichlet_alpha] * len(actions))
     frac = config.root_exploration_fraction
@@ -218,12 +206,10 @@ def add_exploration_noise(config: MuZeroConfig, node: Node):
 ####### Part 2: Training #########
 
 
-def train_network(config: MuZeroConfig, storage: SharedStorage,
-                replay_buffer: ReplayBuffer):
+def train_network(storage: SharedStorage, replay_buffer: ReplayBuffer):
     network = Network(config.action_space_size)
 
-    optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate,
-                            momentum=config.momentum)
+    optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
 
     for i in range(config.training_steps):
         if i % config.checkpoint_interval == 0:
@@ -293,12 +279,6 @@ def softmax_sample(distribution, temperature: float):
 def launch_job(f, *args):
     f(*args)
 
-def make_uniform_network():
-    return Network(make_reversi_config().action_space_size).to(device)
-
 if __name__ == '__main__':
     mp.set_start_method('spawn')
-    config = make_reversi_config()
-    # vs_random_once = random_vs_random()
-    # print('random_vs_random = ', sorted(vs_random_once.items()), end='\n')
-    network = muzero(config)
+    network = muzero()
