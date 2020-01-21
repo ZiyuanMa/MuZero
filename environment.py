@@ -151,7 +151,7 @@ class Environment:
 class Game:
     """A single episode of interaction with the environment."""
 
-    def __init__(self, action_space_size: int, discount: float):
+    def __init__(self):
         self.environment = Environment()  # Game specific environment.
         self.history = []
         self.rewards = []

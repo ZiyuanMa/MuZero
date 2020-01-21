@@ -8,8 +8,8 @@ import torch.multiprocessing as mp
 import enum
 import collections
 from tqdm import tqdm
+import os
 MAXIMUM_FLOAT_VALUE = float('inf')
-
 KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
 
 
@@ -41,9 +41,12 @@ def muzero():
     replay_buffer = ReplayBuffer()
 
     for _ in range(config.training_steps//config.checkpoint_interval):
+        os.environ["OMP_NUM_THREADS"] = "1"
         run_selfplay(storage, replay_buffer)
-
+        os.environ["OMP_NUM_THREADS"] = str(os.cpu_count())
         train_network(storage, replay_buffer)
+
+        storage.save_latest_network()
 
     return storage.latest_network()
 
@@ -58,20 +61,20 @@ def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
 
     # network = storage.latest_network()
     # network.share_memory()
-    # with mp.Pool(2) as p:
-    #     for _ in tqdm(range(30)):
-    #         p.apply(play_game, args=(network))
+    # with mp.Pool(4) as p:
+    #     for _ in tqdm(range(config.episodes)):
+    #         p.apply(play_game, args=(network,))
 
     network = storage.latest_network()
     network.share_memory()
-    with mp.Pool(4) as p:
+    with mp.Pool(os.cpu_count()) as p:
         pbar = tqdm(total=config.episodes)
         def update(ret):
             pbar.update()
             replay_buffer.save_game(ret)
 
         for _ in range(config.episodes):
-            p.apply_async(play_game, args=(network), callback= update)
+            p.apply_async(play_game, args=(network,), callback= update)
         p.close()
         p.join()
         pbar.close()
@@ -99,6 +102,7 @@ def play_game(network: Network) -> Game:
         action = select_action(len(game.history), root, network)
         game.apply(action)
         game.store_search_statistics(root)
+
     return game
 
 
@@ -281,4 +285,6 @@ def launch_job(f, *args):
 
 if __name__ == '__main__':
     mp.set_start_method('spawn')
+    # torch.set_num_threads(1)
+    print(os.cpu_count())
     network = muzero()

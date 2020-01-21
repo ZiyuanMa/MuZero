@@ -196,7 +196,7 @@ class SharedStorage:
     def save_network(self, step: int, network: Network):
         self._networks[step] = network
 
-    def save_network_dict(self, optimizer: torch.optim):
+    def save_latest_network(self, optimizer: torch.optim):
         max_step = max(self._networks.keys())
         torch.save({
                 'net': self._networks[max_step].state_dict(),

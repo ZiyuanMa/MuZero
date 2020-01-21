@@ -117,4 +117,4 @@ lr_init = 0.01
 lr_decay_rate = 0.1
 lr_decay_steps = 400e3
 
-episodes=1024
+episodes=12
