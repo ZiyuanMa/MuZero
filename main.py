@@ -68,7 +68,7 @@ def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
 
     network = storage.latest_network()
     network.share_memory()
-    with mp.Pool(os.cpu_count()//2) as p:
+    with mp.Pool(os.cpu_count()-1) as p:
         pbar = tqdm(total=config.episodes)
         def update(ret):
             pbar.update()
@@ -216,9 +216,8 @@ def train_network(storage: SharedStorage, replay_buffer: ReplayBuffer):
 
     optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
 
-    for i in range(config.checkpoint_interval):
-        if i % config.checkpoint_interval == 0:
-            storage.save_network(i, network)
+    for i in tqdm(range(config.checkpoint_interval)):
+
         batch = replay_buffer.sample_batch(config.num_unroll_steps, config.td_steps)
         data_set = Dataset(batch)
         data_loader = DataLoader(dataset=data_set,
