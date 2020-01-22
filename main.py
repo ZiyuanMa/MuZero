@@ -10,6 +10,7 @@ import collections
 from tqdm import tqdm
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
+import pickle
 torch.manual_seed(1261)
 random.seed(1261)
 MAXIMUM_FLOAT_VALUE = float('inf')
@@ -45,6 +46,10 @@ def muzero():
 
     for _ in range(config.training_steps//config.checkpoint_interval):
         run_selfplay(storage, replay_buffer)
+        batch = replay_buffer.sample_batch(config.num_unroll_steps, config.td_steps)
+        data_set = Dataset(batch)
+        with open('./data.pth','wb') as f:
+            pickle.dump(data_set, f)
         train_network(storage, replay_buffer)
 
         storage.save_latest_network()
@@ -68,7 +73,7 @@ def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
 
     network = storage.latest_network()
     network.share_memory()
-    with mp.Pool(os.cpu_count()-1) as p:
+    with mp.Pool(os.cpu_count()) as p:
         pbar = tqdm(total=config.episodes)
         def update(ret):
             pbar.update()
@@ -285,5 +290,5 @@ def launch_job(f, *args):
 
 if __name__ == '__main__':
     mp.set_start_method('spawn')
-
+    # os.environ["OMP_NUM_THREADS"] = "12"
     muzero()

@@ -63,13 +63,11 @@ class ResidualBlock(nn.Module):
 
 class Representation(nn.Module):
     # from board to hidden state
-    def __init__(self, input_shape):
+    def __init__(self):
         super().__init__()
-        self.input_shape = input_shape
-        self.board_size = self.input_shape[1] * self.input_shape[2]
 
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=4,
+            nn.Conv2d(in_channels=config.state_shape[0],
                             out_channels=filter_num,
                             kernel_size=3,
                             stride=1,
@@ -87,7 +85,7 @@ class Representation(nn.Module):
 
 class Prediction(nn.Module):
     # use hidden state to predict value and policy
-    def __init__(self, action_shape):
+    def __init__(self):
         super().__init__()
         self.board_size = 64
 
@@ -148,8 +146,8 @@ class Network(nn.Module):
         self.action_space_size = action_space_size
         input_shape = (4, 8, 8)
         rp_shape = (filter_num, *input_shape[1:])
-        self.representation = Representation(input_shape)
-        self.prediction = Prediction(action_space_size)
+        self.representation = Representation()
+        self.prediction = Prediction()
         self.dynamics = Dynamics(rp_shape, (1, 8, 8))
         self.eval()
 

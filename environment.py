@@ -188,22 +188,15 @@ class Game:
         # layer 2: board with black stone
         # layer 3: binary board for it is white's turn
         # layer 4: binary board for it is black's turn
-        image = np.empty([4,8,8], dtype=np.float32)
+        image = np.empty([2,8,8], dtype=np.float32)
         o = Environment().reset()
 
         for current_index in range(0, state_index):
             o.step(self.history[current_index])
 
         board = o.get_board()
-        image[0,:,:] = board==1
-        image[1,:,:] = board==-1
-        turn_board = np.zeros((2,board.shape[0], board.shape[1]))
-        if o.player_turn == 1:
-            turn_board[0,:,:] = 1
-        elif o.player_turn == -1:
-            turn_board[1,:,:] = 1
-        
-        image[2:,:,:] = turn_board
+        image[0,:,:] = board==self.environment.turn
+        image[1,:,:] = board==-self.environment.turn
 
         return image
 
@@ -266,5 +259,10 @@ class ReplayBuffer:
         return games
     def sample_position(self, game) -> int:
         # Sample position from game either uniformly or according to some priority.
-        return np.random.choice(range(len(game.history)-config.num_unroll_steps))
+        return random.choice(range(len(game.history)-config.num_unroll_steps))
 
+    def batch_game(self):
+        game_pos = [(g, i) for i in range(len(g.history)-config.num_unroll_steps) for g in self.buffer]
+        return [(g.make_image(pos), g.history[pos:pos + num_unroll_steps],
+            g.make_target(pos, num_unroll_steps, td_steps))
+            for (g, pos) in game_pos]
