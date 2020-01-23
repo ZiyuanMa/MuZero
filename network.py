@@ -117,9 +117,8 @@ class Prediction(nn.Module):
 
 class Dynamics(nn.Module):
     '''Hidden state transition'''
-    def __init__(self, rp_shape, act_shape):
+    def __init__(self):
         super().__init__()
-        self.rp_shape = rp_shape
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels=filter_num + 1,
                             out_channels=filter_num,
@@ -140,15 +139,12 @@ class Dynamics(nn.Module):
 
 class Network(nn.Module):
 
-    def __init__(self, action_space_size: int):
+    def __init__(self):
         super().__init__()
         self.steps = 0
-        self.action_space_size = action_space_size
-        input_shape = (4, 8, 8)
-        rp_shape = (filter_num, *input_shape[1:])
         self.representation = Representation()
         self.prediction = Prediction()
-        self.dynamics = Dynamics(rp_shape, (1, 8, 8))
+        self.dynamics = Dynamics()
         self.eval()
 
     def initial_inference(self, image: torch.FloatTensor):

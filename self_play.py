@@ -1,64 +1,26 @@
-from environment import *
 from network import *
 import config
-from typing import Dict, List, Optional
-import math
-import numpy as np
 import torch.multiprocessing as mp
-import enum
-import collections
-from tqdm import tqdm
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
-import pickle
-torch.manual_seed(1261)
-random.seed(1261)
-MAXIMUM_FLOAT_VALUE = float('inf')
-KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
 
 
-class MinMaxStats(object):
-
-    """A class that holds the min-max values of the tree."""
-    def __init__(self, known_bounds: Optional[KnownBounds]):
-        self.maximum = known_bounds.max if known_bounds else -MAXIMUM_FLOAT_VALUE
-        self.minimum = known_bounds.min if known_bounds else MAXIMUM_FLOAT_VALUE
-
-    def update(self, value: float):
-        self.maximum = max(self.maximum, value)
-        self.minimum = min(self.minimum, value)
-
-    def normalize(self, value: float) -> float:
-        if self.maximum > self.minimum:
-            # We normalize only when we have set the maximum and minimum values.
-            return (value - self.minimum) / (self.maximum - self.minimum)
-        return value
 
 
-# MuZero training is split into two independent parts: Network training and
-# self-play data generation.
-# These two parts only communicate by transferring the latest network checkpoint
-# from the training to the self-play, and the finished games from the self-play
-# to the training.
-def muzero():
-    storage = SharedStorage()
-    replay_buffer = ReplayBuffer()
+def load_network():
+    network = Network()
+    model_name = None
 
-    for _ in range(config.training_steps//config.checkpoint_interval):
-        run_selfplay(storage, replay_buffer)
-        batch = replay_buffer.sample_batch(config.num_unroll_steps, config.td_steps)
-        data_set = Dataset(batch)
-        with open('./data.pth','wb') as f:
-            pickle.dump(data_set, f)
-        train_network(storage, replay_buffer)
+    for filename in os.listdir('.'):
+        if fnmatch.fnmatch(filename, 'model*.pth'):
+            model_name = filename
 
-        storage.save_latest_network()
+    if model_name: 
+        checkpoint = torch.load(model_name)
+        network.load_state_dict(checkpoint)
+    
+    return network
 
-    return storage.latest_network()
-
-# Each self-play job is independent of all others; it takes the latest network
-# snapshot, produces a game and makes it available to the training job by
-# writing it to a shared replay buffer.
 def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
     # for _ in tqdm(range(30)):
     #     network = storage.latest_network()
@@ -71,7 +33,7 @@ def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
     #     for _ in tqdm(range(config.episodes)):
     #         p.apply(play_game, args=(network,))
 
-    network = storage.latest_network()
+    network = load_network()
     network.share_memory()
     with mp.Pool(os.cpu_count()) as p:
         pbar = tqdm(total=config.episodes)
@@ -208,87 +170,3 @@ def add_exploration_noise(node: Node):
     frac = config.root_exploration_fraction
     for a, n in zip(actions, noise):
         node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
-
-######### End Self-Play ##########
-##################################
-
-##################################
-####### Part 2: Training #########
-
-
-def train_network(storage: SharedStorage, replay_buffer: ReplayBuffer):
-    network = Network(config.action_space_size)
-
-    optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
-
-    for i in tqdm(range(config.checkpoint_interval)):
-
-        batch = replay_buffer.sample_batch(config.num_unroll_steps, config.td_steps)
-        data_set = Dataset(batch)
-        data_loader = DataLoader(dataset=data_set,
-                            num_workers=4,
-                            batch_size=config.mini_batch_size,
-                            shuffle=True)
-        update_weights(optimizer, network, data_loader, config.weight_decay)
-    storage.save_network(network.steps, network)
-
-
-def update_weights(optimizer: torch.optim, network: Network, data_loader):
-    network.train()
-    optimizer.zero_grad()
-    p_loss, v_loss = 0, 0
-
-    for image, actions, target_values, target_rewards, target_policies in data_loader:
-        # Initial step, from the real observation.
-        net_output = network.initial_inference(image)
-        # value, reward, policy_logits, hidden_state = network.initial_inference(image)
-        predictions = [(1.0, net_output.value, net_output.reward, net_output.policy_logits)]
-        hidden_state = net_output.hidden_state
-    # Recurrent steps, from action and previous hidden state.
-        for action in actions:
-            # action_tensor = action.encode()
-            net_output = network.recurrent_inference(hidden_state, action)
-            # value, reward, policy_logits, hidden_state = network.recurrent_inference(hidden_state, action)
-            predictions.append((1.0 / len(actions), net_output.value, net_output.reward, net_output.policy_logits))
-            hidden_state = net_output.hidden_state
-
-        for prediction, target_value, target_reward, target_policy in zip(predictions, target_values, target_rewards, target_policies):
-            # if(len(target[2]) > 0):
-            _ , value, reward, policy_logits = prediction
-            
-            # target_policy = torch.stack(target_policy).float()
-            p_loss += torch.mean(torch.sum(-target_policy * torch.log(policy_logits), dim=1))
-            v_loss += torch.mean(torch.sum((target_value - value) ** 2, dim=1))
-  
-  
-    total_loss = (p_loss + v_loss)
-    total_loss.backward()
-    optimizer.step()
-    network.steps += 1
-    print('p_loss %f v_loss %f' % (p_loss, v_loss))
-
-
-def scalar_loss(prediction, target) -> float:
-    # MSE in board games, cross entropy between categorical values in Atari.
-    return -1
-
-def softmax_sample(distribution, temperature: float):
-    visits = [i[0] for i in distribution]
-    actions = [i[1] for i in distribution]
-    if temperature == 0:
-        return actions[visits.index(max(visits))]
-    elif temperature == 1:
-        visits_sum = sum(visits)
-        visits_prob = [i/visits_sum for i in visits]
-        return np.random.choice(actions, 1, visits_prob).item()
-    else:
-        raise NotImplementedError
-
-def launch_job(f, *args):
-    f(*args)
-
-if __name__ == '__main__':
-    mp.set_start_method('spawn')
-    # os.environ["OMP_NUM_THREADS"] = "12"
-    subprocess.call(["python3", "self_play.py"])
-    muzero()
