@@ -3,7 +3,10 @@ import config
 import re
 import fnmatch
 import torch
+import pickle
 from torch.utils.data import Subset
+from tqdm import tqdm
+import random
 import os
 os.environ["OMP_NUM_THREADS"] = "12"
 
@@ -13,8 +16,9 @@ def load_training_set():
         
     return data_set
 
-def load_network():
+def load_model():
     network = Network()
+    optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
     model_name = None
 
     for filename in os.listdir('.'):
@@ -25,9 +29,11 @@ def load_network():
         raise RuntimeError('model does not exist')
     
     checkpoint = torch.load(model_name)
-    network.load_state_dict(checkpoint)
+    network.load_state_dict(checkpoint['network'])
+    network.train()
+    optimizer.load_state_dict(checkpoint['optimizer'])
         
-    return network
+    return network, optimizer
 
 def load_optimizer():
     with open('./optimizer.pth','rb') as f:
@@ -35,13 +41,12 @@ def load_optimizer():
         
     return optimizer
 
-def train_network(storage: SharedStorage, replay_buffer: ReplayBuffer):
-    network = load_network()
-    optimizer = load_optimizer()
+def train_network():
+    network, optimizer = load_model()
     data_set = load_training_set()
 
     for i in tqdm(range(config.checkpoint_interval)):
-        batch = replay_buffer.sample_batch(config.num_unroll_steps, config.td_steps)
+
         sub_data_set = Subset(random.sample(range(len(data_set)), config.batch_size), data_set)
         data_loader = DataLoader(dataset=sub_data_set,
                             num_workers=4,
@@ -70,6 +75,8 @@ def update_weights(optimizer: torch.optim, network: Network, data_loader):
 
         for prediction, target_value, target_reward, target_policy in zip(predictions, target_values, target_rewards, target_policies):
             _ , value, reward, policy_logits = prediction
+
+
             p_loss += torch.mean(torch.sum(-target_policy * torch.log(policy_logits), dim=1))
             v_loss += torch.mean(torch.sum((target_value - value) ** 2, dim=1))
   
@@ -81,4 +88,5 @@ def update_weights(optimizer: torch.optim, network: Network, data_loader):
     print('p_loss %f v_loss %f' % (p_loss, v_loss))
 
 if __name__ == '__main__':
+
     train_network()

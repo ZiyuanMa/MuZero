@@ -145,7 +145,6 @@ class Network(nn.Module):
         self.representation = Representation()
         self.prediction = Prediction()
         self.dynamics = Dynamics()
-        self.eval()
 
     def initial_inference(self, image: torch.FloatTensor):
         # representation + prediction function
@@ -179,14 +178,14 @@ class SharedStorage:
             return self._networks[max(self._networks.keys())]
         else:
             # policy -> uniform, value -> 0, reward -> 0
-            return Network(config.action_space_size)
+            return Network()
 
     def old_network(self) -> Network:
         if self._networks:
             return self._networks[min(self._networks.keys())]
         else:
             # policy -> uniform, value -> 0, reward -> 0
-            return Network(config.action_space_size)
+            return Network()
     def save_network(self, step: int, network: Network):
         self._networks[step] = network
 

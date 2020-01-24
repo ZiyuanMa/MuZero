@@ -263,6 +263,26 @@ class ReplayBuffer:
 
     def batch_game(self):
         game_pos = [(g, i) for i in range(len(g.history)-config.num_unroll_steps) for g in self.buffer]
-        return [(g.make_image(pos), g.history[pos:pos + num_unroll_steps],
-            g.make_target(pos, num_unroll_steps, td_steps))
+        return [(g.make_image(pos), g.history[pos:pos + config.num_unroll_steps],
+            g.make_target(pos, config.num_unroll_steps, config.td_steps))
             for (g, pos) in game_pos]
+
+
+MAXIMUM_FLOAT_VALUE = float('inf')
+
+class MinMaxStats:
+
+    """A class that holds the min-max values of the tree."""
+    def __init__(self, known_bounds: tuple):
+        self.minimum = known_bounds[0] if known_bounds else MAXIMUM_FLOAT_VALUE
+        self.maximum = known_bounds[1] if known_bounds else -MAXIMUM_FLOAT_VALUE
+
+    def update(self, value: float):
+        self.minimum = min(self.minimum, value)
+        self.maximum = max(self.maximum, value)
+
+    def normalize(self, value: float) -> float:
+        if self.maximum > self.minimum:
+            # We normalize only when we have set the maximum and minimum values.
+            return (value - self.minimum) / (self.maximum - self.minimum)
+        return value

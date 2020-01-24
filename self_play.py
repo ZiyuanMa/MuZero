@@ -1,7 +1,12 @@
 from network import *
+from environment import *
 import config
+import torch
 import torch.multiprocessing as mp
 import os
+import math
+import fnmatch
+from tqdm import tqdm
 os.environ["OMP_NUM_THREADS"] = "1"
 
 
@@ -17,35 +22,43 @@ def load_network():
 
     if model_name: 
         checkpoint = torch.load(model_name)
-        network.load_state_dict(checkpoint)
-    
+        network.load_state_dict(checkpoint['network'])
+        network.eval()
+    else:
+        raise RuntimeError('no model')
+        
     return network
 
-def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
+# def load_buffer():
+
+
+def run_selfplay():
     # for _ in tqdm(range(30)):
     #     network = storage.latest_network()
     #     game = play_game(network)
     #     replay_buffer.save_game(game)
 
-    # network = storage.latest_network()
-    # network.share_memory()
-    # with mp.Pool(4) as p:
-    #     for _ in tqdm(range(config.episodes)):
-    #         p.apply(play_game, args=(network,))
-
     network = load_network()
     network.share_memory()
-    with mp.Pool(os.cpu_count()) as p:
-        pbar = tqdm(total=config.episodes)
-        def update(ret):
-            pbar.update()
-            replay_buffer.save_game(ret)
+    replay_buffer = ReplayBuffer()
+    with mp.Pool(4) as p:
+        for _ in tqdm(range(config.episodes)):
+            p.apply(play_game, args=(network,))
 
-        for _ in range(config.episodes):
-            p.apply_async(play_game, args=(network,), callback= update)
-        p.close()
-        p.join()
-        pbar.close()
+    # network = load_network()
+    # network.share_memory()
+    # replay_buffer = ReplayBuffer()
+    # with mp.Pool(os.cpu_count()) as p:
+    #     pbar = tqdm(total=config.episodes)
+    #     def update(ret):
+    #         pbar.update()
+    #         replay_buffer.save_game(ret)
+
+    #     for _ in range(config.episodes):
+    #         p.apply_async(play_game, args=(network,), callback= update)
+    #     p.close()
+    #     p.join()
+    #     pbar.close()
 
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
@@ -170,3 +183,19 @@ def add_exploration_noise(node: Node):
     frac = config.root_exploration_fraction
     for a, n in zip(actions, noise):
         node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
+
+def softmax_sample(distribution, temperature: float):
+    visits = [i[0] for i in distribution]
+    actions = [i[1] for i in distribution]
+    if temperature == 0:
+        return actions[visits.index(max(visits))]
+    elif temperature == 1:
+        visits_sum = sum(visits)
+        visits_prob = [i/visits_sum for i in visits]
+        return np.random.choice(actions, 1, visits_prob).item()
+    else:
+        raise NotImplementedError
+
+if __name__ == '__main__':
+    mp.set_start_method('spawn')
+    run_selfplay()

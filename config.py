@@ -1,7 +1,4 @@
 
-import collections
-KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
-
 
 def visit_softmax_temperature(num_moves, training_steps):
     if num_moves < 6:
@@ -29,7 +26,7 @@ pb_c_init = 1.25
 # environment, we can use them to initialize the rescaling.
 # This is not strictly necessary, but establishes identical behaviour to
 # AlphaZero in board games.
-known_bounds = KnownBounds(-1, 1)
+known_bounds = (-1, 1)
 
     ### Training
 training_steps = 1500

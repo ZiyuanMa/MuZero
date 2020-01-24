@@ -4,35 +4,36 @@ import config
 from typing import Dict, List, Optional
 import math
 import numpy as np
-import torch.multiprocessing as mp
+import torch
 import enum
 import collections
-from tqdm import tqdm
+import subprocess
 import os
-os.environ["OMP_NUM_THREADS"] = "1"
+import fnmatch
+from tqdm import tqdm
 import pickle
 torch.manual_seed(1261)
 random.seed(1261)
-MAXIMUM_FLOAT_VALUE = float('inf')
-KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
+# MAXIMUM_FLOAT_VALUE = float('inf')
+# KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
 
 
-class MinMaxStats(object):
+# class MinMaxStats:
 
-    """A class that holds the min-max values of the tree."""
-    def __init__(self, known_bounds: Optional[KnownBounds]):
-        self.maximum = known_bounds.max if known_bounds else -MAXIMUM_FLOAT_VALUE
-        self.minimum = known_bounds.min if known_bounds else MAXIMUM_FLOAT_VALUE
+#     """A class that holds the min-max values of the tree."""
+#     def __init__(self, known_bounds: Optional[KnownBounds]):
+#         self.maximum = known_bounds.max if known_bounds else -MAXIMUM_FLOAT_VALUE
+#         self.minimum = known_bounds.min if known_bounds else MAXIMUM_FLOAT_VALUE
 
-    def update(self, value: float):
-        self.maximum = max(self.maximum, value)
-        self.minimum = min(self.minimum, value)
+#     def update(self, value: float):
+#         self.maximum = max(self.maximum, value)
+#         self.minimum = min(self.minimum, value)
 
-    def normalize(self, value: float) -> float:
-        if self.maximum > self.minimum:
-            # We normalize only when we have set the maximum and minimum values.
-            return (value - self.minimum) / (self.maximum - self.minimum)
-        return value
+#     def normalize(self, value: float) -> float:
+#         if self.maximum > self.minimum:
+#             # We normalize only when we have set the maximum and minimum values.
+#             return (value - self.minimum) / (self.maximum - self.minimum)
+#         return value
 
 
 # MuZero training is split into two independent parts: Network training and
@@ -287,8 +288,26 @@ def softmax_sample(distribution, temperature: float):
 def launch_job(f, *args):
     f(*args)
 
+def create_model():
+    
+    model_name = None
+
+    for filename in os.listdir('.'):
+        if fnmatch.fnmatch(filename, 'model*.pth'):
+            model_name = filename
+
+    if not model_name:
+        network = Network()
+        optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
+        torch.save({
+            'network': network.state_dict(),
+            'optimizer': optimizer.state_dict()
+        }, 'model.pth')
+        
+
 if __name__ == '__main__':
-    mp.set_start_method('spawn')
-    # os.environ["OMP_NUM_THREADS"] = "12"
-    subprocess.call(["python3", "self_play.py"])
-    muzero()
+    create_model()
+
+    for _ in range(config.training_steps//config.checkpoint_interval):
+        subprocess.call(["python3", "self_play.py"])
+        subprocess.call(["python3", "train.py"])
