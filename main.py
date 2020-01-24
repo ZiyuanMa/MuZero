@@ -1,7 +1,7 @@
 
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
-from environment import *
+from utilities import *
 from network import *
 import config
 from typing import Dict, List, Optional
@@ -13,6 +13,7 @@ import torch.multiprocessing as mp
 import subprocess
 import fnmatch
 from tqdm import tqdm
+import random
 torch.manual_seed(1261)
 random.seed(1261)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -280,7 +281,7 @@ def softmax_sample(distribution, temperature: float):
     elif temperature == 1:
         visits_sum = sum(visits)
         visits_prob = [i/visits_sum for i in visits]
-        return np.random.choice(actions, 1, visits_prob).item()
+        return random.choice(actions, 1, visits_prob).item()
     else:
         raise NotImplementedError
         

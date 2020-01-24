@@ -1,8 +1,5 @@
 __pycache__
 .vscode
 venv
-test.ipynb
-.ipynb_checkpoints
 model0.pth
-model1.pth
-model2.pth
+.DS_Store

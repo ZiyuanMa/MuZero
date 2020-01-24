@@ -1,4 +1,6 @@
-from environment import Action
+
+""" network of MuZero """
+from utilities import Action
 import config
 import numpy as np
 import torch
