@@ -45,7 +45,7 @@ def run_selfplay():
     # with mp.Pool(4) as p:
     #     for _ in tqdm(range(config.episodes)):
     #         p.apply(play_game, args=(network,))
-
+    print('start self play')
     network = load_network()
     network.share_memory()
     replay_buffer = ReplayBuffer()
@@ -61,9 +61,9 @@ def run_selfplay():
         p.join()
         pbar.close()
 
-    data = replay_buffer.batch_game()
+    data = replay_buffer.generate_data()
     data_set = Dataset(data)
-    with open('./data_set.pth','wb') as f:
+    with open('./data_set.pth','w+') as f:
         pickle.dump(data_set, f)
 
 # Each game is produced by starting at the initial board position, then
@@ -73,7 +73,7 @@ def run_selfplay():
 def play_game(network: Network) -> Game:
     game = Game()
 
-    while not game.terminal() and len(game.history) < config.max_moves+10:
+    while not game.terminal() and len(game.history) < config.max_moves:
         # At the root of the search tree we use the representation function to
         # obtain a hidden state given the current observation.
         root = Node(0, game.to_play())

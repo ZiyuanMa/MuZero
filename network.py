@@ -8,7 +8,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from dataclasses import dataclass
 from typing import Dict, List, Optional
-filter_num = 16
+filter_num = 32
 
 class Dataset(Dataset):
 
@@ -37,7 +37,7 @@ class Dataset(Dataset):
 @dataclass
 class NetworkOutput:
     value: torch.Tensor
-    reward: float
+    reward: torch.Tensor
     policy_logits: torch.Tensor
     hidden_state: torch.Tensor
 
@@ -194,5 +194,4 @@ class SharedStorage:
         torch.save({
                 'net': self._networks[max_step].state_dict(),
                 'optim': optimizer.state_dict(),
-                'step': max_step,
         }, './model'+str(max_step)+'.pth')

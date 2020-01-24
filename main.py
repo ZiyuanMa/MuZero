@@ -1,3 +1,6 @@
+
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
 from environment import *
 from network import *
 import config
@@ -5,74 +8,71 @@ from typing import Dict, List, Optional
 import math
 import numpy as np
 import torch
-import enum
-import collections
+from torch.utils.data import Subset
+import torch.multiprocessing as mp
 import subprocess
-import os
 import fnmatch
 from tqdm import tqdm
-import pickle
 torch.manual_seed(1261)
 random.seed(1261)
-# MAXIMUM_FLOAT_VALUE = float('inf')
-# KnownBounds = collections.namedtuple('KnownBounds', ['min', 'max'])
-
-
-# class MinMaxStats:
-
-#     """A class that holds the min-max values of the tree."""
-#     def __init__(self, known_bounds: Optional[KnownBounds]):
-#         self.maximum = known_bounds.max if known_bounds else -MAXIMUM_FLOAT_VALUE
-#         self.minimum = known_bounds.min if known_bounds else MAXIMUM_FLOAT_VALUE
-
-#     def update(self, value: float):
-#         self.maximum = max(self.maximum, value)
-#         self.minimum = min(self.minimum, value)
-
-#     def normalize(self, value: float) -> float:
-#         if self.maximum > self.minimum:
-#             # We normalize only when we have set the maximum and minimum values.
-#             return (value - self.minimum) / (self.maximum - self.minimum)
-#         return value
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 # MuZero training is split into two independent parts: Network training and
 # self-play data generation.
-# These two parts only communicate by transferring the latest network checkpoint
-# from the training to the self-play, and the finished games from the self-play
-# to the training.
 def muzero():
-    storage = SharedStorage()
+
     replay_buffer = ReplayBuffer()
-
+    network, optimizer = load_model()
     for _ in range(config.training_steps//config.checkpoint_interval):
-        run_selfplay(storage, replay_buffer)
-        batch = replay_buffer.sample_batch(config.num_unroll_steps, config.td_steps)
-        data_set = Dataset(batch)
-        with open('./data.pth','wb') as f:
-            pickle.dump(data_set, f)
-        train_network(storage, replay_buffer)
+        
+        run_selfplay(network, replay_buffer)
 
-        storage.save_latest_network()
+        train_network(network, optimizer, replay_buffer)
 
-    return storage.latest_network()
+        torch.save({
+                'network': network.state_dict(),
+                'optimizer': optimizer.state_dict(),
+        }, './model'+str(network.steps)+'.pth')
+
+
+def load_model():
+    
+    network = Network()
+    optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
+    model_name = None
+
+    for filename in os.listdir('.'):
+        if fnmatch.fnmatch(filename, 'model*.pth'):
+            model_name = filename
+
+    if model_name:
+        checkpoint = torch.load(model_name)
+        network.load_state_dict(checkpoint['network'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        print('find model, load %d steps model' % network.steps)
+    else:
+        print('no model, create new model')
+        torch.save({
+            'network': network.state_dict(),
+            'optimizer': optimizer.state_dict()
+        }, 'model0.pth')
+
+    return network, optimizer
 
 # Each self-play job is independent of all others; it takes the latest network
 # snapshot, produces a game and makes it available to the training job by
 # writing it to a shared replay buffer.
-def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
-    # for _ in tqdm(range(30)):
-    #     network = storage.latest_network()
-    #     game = play_game(network)
-    #     replay_buffer.save_game(game)
+def run_selfplay(network, replay_buffer: ReplayBuffer):
+    print('start self-play')
 
-    # network = storage.latest_network()
+    # network.eval()
     # network.share_memory()
-    # with mp.Pool(4) as p:
+    # with mp.Pool(os.cpu_count()) as p:
     #     for _ in tqdm(range(config.episodes)):
     #         p.apply(play_game, args=(network,))
 
-    network = storage.latest_network()
+    network.eval()
     network.share_memory()
     with mp.Pool(os.cpu_count()) as p:
         pbar = tqdm(total=config.episodes)
@@ -89,17 +89,17 @@ def run_selfplay(storage: SharedStorage, replay_buffer: ReplayBuffer):
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
 # of the game is reached.
-@torch.no_grad()
 def play_game(network: Network) -> Game:
     game = Game()
 
-    while not game.terminal() and len(game.history) < config.max_moves+10:
+    while not game.terminal() and len(game.history) < config.max_moves:
         # At the root of the search tree we use the representation function to
         # obtain a hidden state given the current observation.
         root = Node(0, game.to_play())
         current_observation = game.make_image(-1)
         current_observation = torch.from_numpy(current_observation)
-        net_output = network.initial_inference(current_observation)
+        with torch.no_grad():
+            net_output = network.initial_inference(current_observation)
         expand_node(root, game.legal_actions(), net_output)
         add_exploration_noise(root)
 
@@ -117,7 +117,6 @@ def play_game(network: Network) -> Game:
 # To decide on an action, we run N simulations, always starting at the root of
 # the search tree and traversing the tree according to the UCB formula until we
 # reach a leaf node.
-@torch.no_grad()
 def run_mcts(root: Node, action_history: ActionHistory, network: Network):
     min_max_stats = MinMaxStats(config.known_bounds)
 
@@ -136,7 +135,8 @@ def run_mcts(root: Node, action_history: ActionHistory, network: Network):
         parent = search_path[-2]
         encoded_action = history.last_action().encode()
         encoded_action = torch.from_numpy(encoded_action)
-        network_output = network.recurrent_inference(parent.hidden_state, encoded_action)
+        with torch.no_grad():
+            network_output = network.recurrent_inference(parent.hidden_state, encoded_action)
         expand_node(node, history.action_space(), network_output)
 
         backpropagate(search_path, network_output.value, history.to_play(),
@@ -217,47 +217,54 @@ def add_exploration_noise(node: Node):
 ####### Part 2: Training #########
 
 
-def train_network(storage: SharedStorage, replay_buffer: ReplayBuffer):
-    network = Network(config.action_space_size)
+def train_network(network, optimizer, replay_buffer: ReplayBuffer):
 
-    optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
+    network.train()
+    network.to(device)
 
-    for i in tqdm(range(config.checkpoint_interval)):
+    data = replay_buffer.generate_data()
+    data_set = Dataset(data)
 
-        batch = replay_buffer.sample_batch(config.num_unroll_steps, config.td_steps)
-        data_set = Dataset(batch)
-        data_loader = DataLoader(dataset=data_set,
+    print('start training')
+    for i in range(config.checkpoint_interval):
+
+        sub_data_set = Subset(data_set, random.sample(range(len(data_set)), config.batch_size))
+        data_loader = DataLoader(dataset=sub_data_set,
                             num_workers=4,
                             batch_size=config.mini_batch_size,
+                            pin_memory = True,
                             shuffle=True)
-        update_weights(optimizer, network, data_loader, config.weight_decay)
-    storage.save_network(network.steps, network)
+        update_weights(optimizer, network, data_loader)
+
+    network.to(torch.device('cpu'))
 
 
-def update_weights(optimizer: torch.optim, network: Network, data_loader):
-    network.train()
+def update_weights(optimizer: torch.optim, network: Network, data_loader, ):
+
     optimizer.zero_grad()
     p_loss, v_loss = 0, 0
 
     for image, actions, target_values, target_rewards, target_policies in data_loader:
+        image = image.to(device)
         # Initial step, from the real observation.
         net_output = network.initial_inference(image)
-        # value, reward, policy_logits, hidden_state = network.initial_inference(image)
         predictions = [(1.0, net_output.value, net_output.reward, net_output.policy_logits)]
         hidden_state = net_output.hidden_state
-    # Recurrent steps, from action and previous hidden state.
+
+        # Recurrent steps, from action and previous hidden state.
         for action in actions:
-            # action_tensor = action.encode()
+            action = action.to(device)
+
             net_output = network.recurrent_inference(hidden_state, action)
-            # value, reward, policy_logits, hidden_state = network.recurrent_inference(hidden_state, action)
+
             predictions.append((1.0 / len(actions), net_output.value, net_output.reward, net_output.policy_logits))
             hidden_state = net_output.hidden_state
 
         for prediction, target_value, target_reward, target_policy in zip(predictions, target_values, target_rewards, target_policies):
-            # if(len(target[2]) > 0):
+            target_value, target_reward, target_policy = target_value.to(device), target_reward.to(device), target_policy.to(device)
+
             _ , value, reward, policy_logits = prediction
             
-            # target_policy = torch.stack(target_policy).float()
             p_loss += torch.mean(torch.sum(-target_policy * torch.log(policy_logits), dim=1))
             v_loss += torch.mean(torch.sum((target_value - value) ** 2, dim=1))
   
@@ -265,13 +272,9 @@ def update_weights(optimizer: torch.optim, network: Network, data_loader):
     total_loss = (p_loss + v_loss)
     total_loss.backward()
     optimizer.step()
+    print('step %d: p_loss %f v_loss %f' % (network.steps%config.checkpoint_interval, p_loss, v_loss))
     network.steps += 1
-    print('p_loss %f v_loss %f' % (p_loss, v_loss))
 
-
-def scalar_loss(prediction, target) -> float:
-    # MSE in board games, cross entropy between categorical values in Atari.
-    return -1
 
 def softmax_sample(distribution, temperature: float):
     visits = [i[0] for i in distribution]
@@ -284,24 +287,9 @@ def softmax_sample(distribution, temperature: float):
         return np.random.choice(actions, 1, visits_prob).item()
     else:
         raise NotImplementedError
-
-def launch_job(f, *args):
-    f(*args)
-
-def create_model():
-
-    if not os.path.exists('model0.pth'):
-        network = Network()
-        optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
-        torch.save({
-            'network': network.state_dict(),
-            'optimizer': optimizer.state_dict()
-        }, 'model0.pth')
         
 
 if __name__ == '__main__':
-    create_model()
 
-    for i in range(config.training_steps//config.checkpoint_interval):
-        subprocess.call(["python3", "self_play.py"])
-        subprocess.call(["python3", "train.py"])
+    muzero()
+

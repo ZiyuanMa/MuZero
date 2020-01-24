@@ -1,30 +1,19 @@
+
+""" useful classes for Muzero """
 from reversi import available_pos, set_position, init_board
 import config
 import random
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Optional
-# class Action(object):
-
-#   def __init__(self, index: int):
-#     self.index = index
-
-#   def __hash__(self):
-#     return self.index
-
-#   def __eq__(self, other):
-#     return self.index == other.index
-
-#   def __gt__(self, other):
-#     return self.index > other.index
+from typing import List
 
 
 @dataclass(order=True, unsafe_hash=True)
-class Action():
+class Action:
     index: int
 
     def encode(self):
-        # encode to tensor
+        """ encode action to network input shape """ 
         board = np.zeros([1,8,8], dtype=np.float32)
         if self.index < 64:
             row, column = self.index // 8, self.index % 8
@@ -54,9 +43,6 @@ class Node:
         return self.to_play
 
 class ActionHistory:
-    # def __init__(self, history: List[Action], action_space_size: int):
-    #     self.history = list(history)
-    #     self.action_space_size = action_space_size
     """Simple history container used inside the search.
 
     Only used to keep track of the actions executed.
@@ -102,17 +88,6 @@ class Environment:
         self.resigned = False
         self.actions = [Action(row*8+column) for row, column in available_pos(self.board, self.turn)]
         return self
-    # def update(self, board):
-    #     self.board = np.copy(board)
-    #     self.turn = self.turn_n()
-    #     self.done = False
-    #     self.winner = None
-    #     self.resigned = False
-    #     return self
-
-
-    # def turn_n(self):
-    #     return np.count_nonzero(self.board!=0)
 
     def player_turn(self):
         return self.turn
@@ -183,11 +158,7 @@ class Game:
         self.root_values.append(root.value())
 
     def make_image(self, state_index: int) -> np.array:
-        # convert state to Representation network input
-        # layer 1: board with white stone
-        # layer 2: board with black stone
-        # layer 3: binary board for it is white's turn
-        # layer 4: binary board for it is black's turn
+        """ convert state to Representation network input """
         image = np.empty([2,8,8], dtype=np.float32)
         o = Environment().reset()
 
@@ -213,12 +184,11 @@ class Game:
 
             l = self.rewards[current_index:bootstrap_index]
             for i, reward in enumerate(self.rewards[current_index:bootstrap_index]):
-                value += reward * self.discount**i * -1**i # pytype: disable=unsupported-operands
+                value += reward * self.discount**i * -1**i
 
             if current_index < len(self.root_values):
                 targets.append((value, self.rewards[current_index], self.child_visits[current_index]))
             else:
-                # States past the end of games are treated as absorbing states.
                 # targets.append((0, 0, []))
                 raise RuntimeError('out of end of game')
         return targets
@@ -241,28 +211,9 @@ class ReplayBuffer:
             del self.buffer[0]
         self.buffer.append(game)
 
-    def sample_batch(self, num_unroll_steps: int, td_steps: int):
-        games = self.sample_game()
-        game_pos = [(g, self.sample_position(g)) for g in games]
-        return [(g.make_image(pos), g.history[pos:pos + num_unroll_steps],
-            g.make_target(pos, num_unroll_steps, td_steps))
-            for (g, pos) in game_pos]
-
-    def sample_game(self) -> Game:
-        # Sample game from buffer either uniformly or according to some priority.
-        games = []
-        count = self.batch_size
-        while count >= len(self.buffer):
-            games.extend(self.buffer.copy())
-            count -= len(self.buffer)
-        games.extend(random.sample(self.buffer, count))
-        return games
-    def sample_position(self, game) -> int:
-        # Sample position from game either uniformly or according to some priority.
-        return random.choice(range(len(game.history)-config.num_unroll_steps))
-
-    def batch_game(self):
-        game_pos = [(g, i) for i in range(len(g.history)-config.num_unroll_steps) for g in self.buffer]
+    def generate_data(self):
+        """ generate game data for training """
+        game_pos = [(g, i) for g in self.buffer for i in range(len(g.history)-config.num_unroll_steps)]
         return [(g.make_image(pos), g.history[pos:pos + config.num_unroll_steps],
             g.make_target(pos, config.num_unroll_steps, config.td_steps))
             for (g, pos) in game_pos]

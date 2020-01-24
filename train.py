@@ -42,14 +42,19 @@ def train_network():
 
     for i in tqdm(range(config.checkpoint_interval)):
 
+        # sample game data
         sub_data_set = Subset(random.sample(range(len(data_set)), config.batch_size), data_set)
         data_loader = DataLoader(dataset=sub_data_set,
                             num_workers=4,
                             batch_size=config.mini_batch_size,
                             shuffle=True)
+
+
         update_weights(optimizer, network, data_loader)
 
-    torch.save(network.state_dict(), './model'+str(network.steps)+'.pth')
+    torch.save({'network': network.state_dict(),
+                'optimizer': optimizer.state_dict()
+                }, './model'+str(network.steps)+'.pth')
 
 def update_weights(optimizer: torch.optim, network: Network, data_loader):
     network.train()

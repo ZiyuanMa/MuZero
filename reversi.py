@@ -1,6 +1,9 @@
+
+"""useful functions for reversi"""
 import math
 import numpy as np
 
+# check if a direction of a position is avaliable
 def check_direction(board, row, column, mark, row_direc, col_direc):
     next_row = row + row_direc
     next_column = column + col_direc
@@ -47,6 +50,7 @@ def check_position(board, row, column, mark):
 
     return available_direc
 
+# 
 def change_direction(board, row, column, row_direc, col_direc):
     non_curr = -board[row][column]
     next_row = row + row_direc
