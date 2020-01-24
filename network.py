@@ -27,12 +27,6 @@ class Dataset(Dataset):
     def __len__(self):
         return self.len
 
-    # def transform(self, narray):
-    #     if random.choice([True, False]):
-            
-    #         return torch.from_numpy(np.rot90(narray, 2).copy()).float().view(2,8,8)
-    #     else:
-    #         return torch.from_numpy(narray).float().view(2,8,8)
 
 @dataclass
 class NetworkOutput:
@@ -188,10 +182,3 @@ class SharedStorage:
             return Network()
     def save_network(self, step: int, network: Network):
         self._networks[step] = network
-
-    def save_latest_network(self, optimizer: torch.optim):
-        max_step = max(self._networks.keys())
-        torch.save({
-                'net': self._networks[max_step].state_dict(),
-                'optim': optimizer.state_dict(),
-        }, './model'+str(max_step)+'.pth')

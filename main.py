@@ -210,12 +210,8 @@ def add_exploration_noise(node: Node):
     for a, n in zip(actions, noise):
         node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
 
-######### End Self-Play ##########
-##################################
-
 ##################################
 ####### Part 2: Training #########
-
 
 def train_network(network, optimizer, replay_buffer: ReplayBuffer):
 

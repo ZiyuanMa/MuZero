@@ -28,7 +28,7 @@ pb_c_init = 1.25
 # AlphaZero in board games.
 known_bounds = (-1, 1)
 
-    ### Training
+# Training
 training_steps = 1500
 checkpoint_interval = 100
 window_size = 512
