@@ -3,6 +3,6 @@ __pycache__
 venv
 test.ipynb
 .ipynb_checkpoints
-model.pth
 model0.pth
 model1.pth
+model2.pth

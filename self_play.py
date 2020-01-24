@@ -6,6 +6,7 @@ import torch.multiprocessing as mp
 import os
 import math
 import fnmatch
+import pickle
 from tqdm import tqdm
 os.environ["OMP_NUM_THREADS"] = "1"
 
@@ -26,7 +27,7 @@ def load_network():
         network.eval()
     else:
         raise RuntimeError('no model')
-        
+
     return network
 
 # def load_buffer():
@@ -38,27 +39,32 @@ def run_selfplay():
     #     game = play_game(network)
     #     replay_buffer.save_game(game)
 
-    network = load_network()
-    network.share_memory()
-    replay_buffer = ReplayBuffer()
-    with mp.Pool(4) as p:
-        for _ in tqdm(range(config.episodes)):
-            p.apply(play_game, args=(network,))
-
     # network = load_network()
     # network.share_memory()
     # replay_buffer = ReplayBuffer()
-    # with mp.Pool(os.cpu_count()) as p:
-    #     pbar = tqdm(total=config.episodes)
-    #     def update(ret):
-    #         pbar.update()
-    #         replay_buffer.save_game(ret)
+    # with mp.Pool(4) as p:
+    #     for _ in tqdm(range(config.episodes)):
+    #         p.apply(play_game, args=(network,))
 
-    #     for _ in range(config.episodes):
-    #         p.apply_async(play_game, args=(network,), callback= update)
-    #     p.close()
-    #     p.join()
-    #     pbar.close()
+    network = load_network()
+    network.share_memory()
+    replay_buffer = ReplayBuffer()
+    with mp.Pool(os.cpu_count()) as p:
+        pbar = tqdm(total=config.episodes)
+        def update(ret):
+            pbar.update()
+            replay_buffer.save_game(ret)
+
+        for _ in range(config.episodes):
+            p.apply_async(play_game, args=(network,), callback= update)
+        p.close()
+        p.join()
+        pbar.close()
+
+    data = replay_buffer.batch_game()
+    data_set = Dataset(data)
+    with open('./data_set.pth','wb') as f:
+        pickle.dump(data_set, f)
 
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end

@@ -289,25 +289,19 @@ def launch_job(f, *args):
     f(*args)
 
 def create_model():
-    
-    model_name = None
 
-    for filename in os.listdir('.'):
-        if fnmatch.fnmatch(filename, 'model*.pth'):
-            model_name = filename
-
-    if not model_name:
+    if not os.path.exists('model0.pth'):
         network = Network()
         optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
         torch.save({
             'network': network.state_dict(),
             'optimizer': optimizer.state_dict()
-        }, 'model.pth')
+        }, 'model0.pth')
         
 
 if __name__ == '__main__':
     create_model()
 
-    for _ in range(config.training_steps//config.checkpoint_interval):
+    for i in range(config.training_steps//config.checkpoint_interval):
         subprocess.call(["python3", "self_play.py"])
         subprocess.call(["python3", "train.py"])

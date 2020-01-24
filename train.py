@@ -11,7 +11,7 @@ import os
 os.environ["OMP_NUM_THREADS"] = "12"
 
 def load_training_set():
-    with open('./data.pth','rb') as f:
+    with open('./data_set.pth','rb') as f:
         data_set = pickle.load(f)
         
     return data_set
@@ -35,11 +35,6 @@ def load_model():
         
     return network, optimizer
 
-def load_optimizer():
-    with open('./optimizer.pth','rb') as f:
-        optimizer = pickle.load(f)
-        
-    return optimizer
 
 def train_network():
     network, optimizer = load_model()
