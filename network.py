@@ -30,27 +30,16 @@ class Dataset(Dataset):
         return self.len
 
 
-@dataclass
-class NetworkOutput:
-    value: torch.Tensor
-    reward: torch.Tensor
-    policy_logits: torch.Tensor
-    hidden_state: torch.Tensor
-
-class Flatten(nn.Module):
-
-    def forward(self, input):
-        return input.view(input.size(0), -1)
 
 
 class ResidualBlock(nn.Module):
     def __init__(self, filters):
         super().__init__()
         self.block = nn.Sequential(
-            nn.Conv2d(filters, filters, 3, 1, 1),
+            nn.Conv2d(filters, filters, 3, 1, 1, bias=False),
             nn.BatchNorm2d(filters),
             nn.LeakyReLU(),
-            nn.Conv2d(filters, filters, 3, 1, 1),
+            nn.Conv2d(filters, filters, 3, 1, 1, bias=False),
             nn.BatchNorm2d(filters)
         )
 
@@ -59,53 +48,70 @@ class ResidualBlock(nn.Module):
 
 class Representation(nn.Module):
     # from board to hidden state
-    def __init__(self):
+    def __init__(self, num_channels=config.num_channels):
         super().__init__()
 
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels=config.state_shape[0],
-                            out_channels=filter_num,
+                            out_channels=num_channels,
                             kernel_size=3,
                             stride=1,
-                            padding=1),
-            nn.BatchNorm2d(filter_num),
+                            padding=1,
+                            bias=False),
+            nn.BatchNorm2d(num_channels),
             nn.LeakyReLU()
         )
-        self.res_blocks = nn.ModuleList([ResidualBlock(filter_num) for _ in range(4)])
+
+        self.conv2 = nn.Sequential(
+            ResidualBlock(num_channels),
+            ResidualBlock(num_channels),
+            ResidualBlock(num_channels),
+            ResidualBlock(num_channels),
+        )
+
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(in_channels=num_channels,
+                            out_channels=2,
+                            kernel_size=3,
+                            stride=1,
+                            padding=1,
+                            bias=False),
+            nn.BatchNorm2d(2),
+            nn.LeakyReLU()
+        )
 
     def forward(self, x):
         x = self.conv1(x)
-        for block in self.res_blocks:
-            x = block(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        # for block in self.res_blocks:
+        #     x = block(x)
         return x
 
 class Prediction(nn.Module):
     # use hidden state to predict value and policy
-    def __init__(self):
+    def __init__(self, num_channels=config.num_channels):
         super().__init__()
         self.board_size = 64
 
+        self.flatten = nn.Flatten()
+
         self.policy_head = nn.Sequential(
-            nn.Conv2d(filter_num, 2, 1),
-            nn.BatchNorm2d(2),
-            nn.LeakyReLU(),
-            nn.Flatten(),
-            nn.Linear(self.board_size*2, self.board_size+1),
+
+            nn.Linear(self.board_size*2, config.action_space_size),
             nn.Softmax(dim=1)
         )
 
         self.value_head = nn.Sequential(
-            nn.Conv2d(filter_num, 1, 1),
-            nn.BatchNorm2d(1),
-            nn.LeakyReLU(),
-            nn.Flatten(),
-            nn.Linear(self.board_size, self.board_size),
+
+            nn.Linear(self.board_size*2, self.board_size),
             nn.LeakyReLU(),
             nn.Linear(self.board_size, 1),
             nn.Tanh()
         )
 
     def forward(self, x):
+        x = self.flatten(x)
         policy = self.policy_head(x)
         value = self.value_head(x)
 
@@ -113,24 +119,24 @@ class Prediction(nn.Module):
 
 class Dynamics(nn.Module):
     '''Hidden state transition'''
-    def __init__(self):
+    def __init__(self, num_channels=config.num_channels):
         super().__init__()
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=filter_num + 1,
-                            out_channels=filter_num,
-                            kernel_size=3,
-                            stride=1,
-                            padding=1),
-            nn.BatchNorm2d(filter_num),
-            nn.LeakyReLU()
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(4, num_channels, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(),
+            ResidualBlock(num_channels),
+            nn.Conv2d(num_channels, 2, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(2),
+            nn.LeakyReLU(),
+
         )
-        self.res_blocks = nn.ModuleList([ResidualBlock(filter_num) for _ in range(4)])
 
     def forward(self, rp, a):
-        h = torch.cat([rp, a], dim=1)
-        h = self.conv1(h)
-        for block in self.res_blocks:
-            h = block(h)
+        h = torch.cat((rp, a), dim=1)
+        h = self.conv(h)
+
         return h
 
 class Network(nn.Module):
@@ -146,9 +152,10 @@ class Network(nn.Module):
         # representation + prediction function
         if image.ndim == 3:
             image = image.unsqueeze(0)
+        # print(image.size())
         hidden = self.representation(image)
         policy, value = self.prediction(hidden)
-        return NetworkOutput(value, torch.Tensor([[0]]), policy, hidden)
+        return value, policy, hidden
 
     def recurrent_inference(self, hidden_state: torch.FloatTensor, action: torch.FloatTensor):
         if hidden_state.ndim == 3:
@@ -158,7 +165,7 @@ class Network(nn.Module):
         # dynamics + prediction function
         hidden = self.dynamics(hidden_state, action)
         policy, value = self.prediction(hidden)
-        return NetworkOutput(value, torch.Tensor([[0]]), policy, hidden)
+        return value, policy, hidden
 
     def training_steps(self) -> int:
         # How many steps / batches the network has been trained for.
@@ -166,21 +173,11 @@ class Network(nn.Module):
 
 class SharedStorage:
 
-    def __init__(self):
-        self._networks = {}
+    def __init__(self, init_network_id):
+        self.network_id = init_network_id
 
-    def latest_network(self) -> Network:
-        if self._networks:
-            return self._networks[max(self._networks.keys())]
-        else:
-            # policy -> uniform, value -> 0, reward -> 0
-            return Network()
+    def get_network(self) -> Network:
+        return self.network_id
 
-    def old_network(self) -> Network:
-        if self._networks:
-            return self._networks[min(self._networks.keys())]
-        else:
-            # policy -> uniform, value -> 0, reward -> 0
-            return Network()
-    def save_network(self, step: int, network: Network):
-        self._networks[step] = network
+    def save_network(self, new_network_id):
+        self.network_id = new_network_id

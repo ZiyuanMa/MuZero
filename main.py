@@ -1,4 +1,3 @@
-
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
 from utilities import *
@@ -10,10 +9,12 @@ import numpy as np
 import torch
 from torch.utils.data import Subset
 import torch.multiprocessing as mp
+import ray
 import subprocess
 import fnmatch
 from tqdm import tqdm
 import random
+from reversi import *
 torch.manual_seed(1261)
 random.seed(1261)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -22,24 +23,28 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # MuZero training is split into two independent parts: Network training and
 # self-play data generation.
 def muzero():
-
-    replay_buffer = ReplayBuffer()
+    ray.init()
+    replay_buffer = ReplayBuffer.remote()
+    
     network, optimizer = load_model()
-    for _ in range(config.training_steps//config.checkpoint_interval):
+    network_id = ray.put(network.state_dict())
+    storage = SharedStorage(network_id)
+    for _ in range(20):
         
-        run_selfplay(network, replay_buffer)
+        run_selfplay.remote(network, storage, replay_buffer)
 
-        train_network(network, optimizer, replay_buffer)
+    while not ray.get(replay_buffer.ready.remote()):
+        time.sleep(5)
 
-        torch.save({
-                'network': network.state_dict(),
-                'optimizer': optimizer.state_dict(),
-        }, './model'+str(network.steps)+'.pth')
+    train_network(network, optimizer, storage, replay_buffer)
+
+
 
 
 def load_model():
     
     network = Network()
+    network.share_memory()
     optimizer = optim.SGD(network.parameters(), lr=0.01, weight_decay=config.lr_decay_rate, momentum=config.momentum)
     model_name = None
 
@@ -64,51 +69,41 @@ def load_model():
 # Each self-play job is independent of all others; it takes the latest network
 # snapshot, produces a game and makes it available to the training job by
 # writing it to a shared replay buffer.
-def run_selfplay(network, replay_buffer: ReplayBuffer):
+@ray.remote(num_cpus=1)
+def run_selfplay(network, storage, replay_buffer: ReplayBuffer):
     print('start self-play')
 
-    # network.eval()
-    # network.share_memory()
-    # with mp.Pool(os.cpu_count()) as p:
-    #     for _ in tqdm(range(config.episodes)):
-    #         p.apply(play_game, args=(network,))
+    while True:
+        network_id = storage.get_network()
+        network.load_state_dict(ray.get(network_id))
+        game = play_game(network)
+        replay_buffer.save_game.remote(game)
 
-    network.eval()
-    network.share_memory()
-    with mp.Pool(os.cpu_count()) as p:
-        pbar = tqdm(total=config.episodes)
-        def update(ret):
-            pbar.update()
-            replay_buffer.save_game(ret)
-
-        for _ in range(config.episodes):
-            p.apply_async(play_game, args=(network,), callback= update)
-        p.close()
-        p.join()
-        pbar.close()
 
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
 # of the game is reached.
-def play_game(network: Network) -> Game:
+def play_game(network) -> Game:
     game = Game()
 
-    while not game.terminal() and len(game.history) < config.max_moves:
+    while not game.terminal() and len(game.action_history) < config.max_moves:
         # At the root of the search tree we use the representation function to
         # obtain a hidden state given the current observation.
         root = Node(0, game.to_play())
         current_observation = game.make_image(-1)
         current_observation = torch.from_numpy(current_observation)
         with torch.no_grad():
+            # print(current_observation.size())
             net_output = network.initial_inference(current_observation)
+        # print(game.legal_actions())
         expand_node(root, game.legal_actions(), net_output)
         add_exploration_noise(root)
 
         # We then run a Monte Carlo Tree Search using only action sequences and the
         # model learned by the network.
-        run_mcts(root, game.action_history(), network)
-        action = select_action(len(game.history), root, network)
-        game.apply(action)
+        run_mcts(root, game.action_history, network)
+        action = select_action(len(game.action_history), root, network)
+        game.apply(Action(action))
         game.store_search_statistics(root)
 
     return game
@@ -118,29 +113,33 @@ def play_game(network: Network) -> Game:
 # To decide on an action, we run N simulations, always starting at the root of
 # the search tree and traversing the tree according to the UCB formula until we
 # reach a leaf node.
-def run_mcts(root: Node, action_history: ActionHistory, network: Network):
+def run_mcts(root: Node, action_history: List, network: Network):
     min_max_stats = MinMaxStats(config.known_bounds)
 
     for _ in range(config.num_simulations):
-        history = action_history.clone()
+        history = action_history.copy()
         node = root
         search_path = [node]
 
         # choose node based on score if it already exists in tree
         while node.expanded():
             action, node = select_child(node, min_max_stats)
-            history.add_action(action)
+            history.append(action)
             search_path.append(node)
 
         # go untill a unexpanded node, expand by using recurrent inference then backup
         parent = search_path[-2]
-        encoded_action = history.last_action().encode()
-        encoded_action = torch.from_numpy(encoded_action)
-        with torch.no_grad():
-            network_output = network.recurrent_inference(parent.hidden_state, encoded_action)
-        expand_node(node, history.action_space(), network_output)
+        last_action = history[-1]
 
-        backpropagate(search_path, network_output.value, history.to_play(),
+        encoded_action = np.zeros((2, 8, 8), dtype=np.float32)
+        player_idx = 0 if last_action is Player.WHITE else 1
+        encoded_action[player_idx, last_action.position] = 1
+        with torch.no_grad():
+            network_output = network.recurrent_inference(parent.hidden_state, torch.from_numpy(encoded_action))
+
+        expand_node(node, [i for i in range(config.action_space_size)], network_output)
+
+        backpropagate(search_path, network_output[0], history[-1].player,
                     config.discount, min_max_stats)
 
 
@@ -160,10 +159,10 @@ def select_action(num_moves: int, node: Node, network: Network):
 
 # Select the child with the highest UCB score.
 def select_child(node: Node, min_max_stats: MinMaxStats):
-    _, action, child = max(
+    _, action_idx, child = max(
         (ucb_score(node, child, min_max_stats), action,
         child) for action, child in node.children.items())
-    return action, child
+    return Action(action_idx), child
 
 
 # The score for a node is based on its value, plus an exploration bonus based on
@@ -180,15 +179,17 @@ def ucb_score(parent: Node, child: Node, min_max_stats: MinMaxStats) -> float:
 
 # We expand a node using the value, reward and policy prediction obtained from
 # the neural network.
-def expand_node(node: Node, actions: List[Action], network_output: NetworkOutput):
-    node.hidden_state = network_output.hidden_state
-    node.reward = network_output.reward
+def expand_node(node: Node, actions: List[int], network_output):
+    node.hidden_state = network_output[2]
+    # node.reward = network_output.reward
+    node.reward = 0
 
     # filter illegal actions only for first expansion of mcts
-    policy = {a: network_output.policy_logits[0][a.index].item() for a in actions}
+    policy = {a: network_output[1][0, a].item() for a in actions}
     policy_sum = sum(policy.values())
+    next_player = Player.WHITE if node.to_play is Player.BLACK else Player.BLACK
     for action, p in policy.items():
-        node.children[action] = Node(p / policy_sum, -node.to_play)
+        node.children[action] = Node(p / policy_sum, next_player)
 
 
 # At the end of a simulation, we propagate the evaluation all the way up to the
@@ -214,62 +215,76 @@ def add_exploration_noise(node: Node):
 ##################################
 ####### Part 2: Training #########
 
-def train_network(network, optimizer, replay_buffer: ReplayBuffer):
+def train_network(network, optimizer, storage:SharedStorage, replay_buffer: ReplayBuffer):
 
     network.train()
     network.to(device)
 
-    data = replay_buffer.generate_data()
-    data_set = Dataset(data)
+    # data_set = Dataset(data)
 
     print('start training')
-    for i in range(config.checkpoint_interval):
+    for i in range(1, config.training_steps+1):
 
-        sub_data_set = Subset(data_set, random.sample(range(len(data_set)), config.batch_size))
-        data_loader = DataLoader(dataset=sub_data_set,
-                            num_workers=4,
-                            batch_size=config.mini_batch_size,
-                            pin_memory = True,
-                            shuffle=True)
-        update_weights(optimizer, network, data_loader)
+        # sub_data_set = Subset(data_set, random.sample(range(len(data_set)), config.batch_size))
+        # data_loader = DataLoader(dataset=sub_data_set,
+        #                     num_workers=4,
+        #                     batch_size=config.mini_batch_size,
+        #                     pin_memory = True,
+        #                     shuffle=True)
+        batch = replay_buffer.sample_batch.remote(config.num_unroll_steps, config.td_steps)
+        batch = ray.get(batch)
 
-    network.to(torch.device('cpu'))
+        update_weights(optimizer, network, batch)
+
+        if i % config.checkpoint_interval == 0:
+            state_dict = network.state_dict()
+            for k, v in state_dict.items():
+                state_dict[k] = v.cpu()
+            network_id = ray.put(state_dict)
+            storage.save_network(network_id)
 
 
-def update_weights(optimizer: torch.optim, network: Network, data_loader, ):
+def update_weights(optimizer: torch.optim, network: Network, batch):
 
     optimizer.zero_grad()
     p_loss, v_loss = 0, 0
 
-    for image, actions, target_values, target_rewards, target_policies in data_loader:
-        image = image.to(device)
-        # Initial step, from the real observation.
-        net_output = network.initial_inference(image)
-        predictions = [(1.0, net_output.value, net_output.reward, net_output.policy_logits)]
-        hidden_state = net_output.hidden_state
+    image, actions, target_values, target_policies = batch
+    image, actions, target_values, target_policies = torch.FloatTensor(image), torch.FloatTensor(actions), torch.FloatTensor(target_values), torch.FloatTensor(target_policies)
+    image, actions, target_values, target_policies = image.to(device), actions.to(device), target_values.to(device), target_policies.to(device)
 
-        # Recurrent steps, from action and previous hidden state.
-        for action in actions:
-            action = action.to(device)
+    # Initial step, from the real observation.
+    value, policy, hidden_state = network.initial_inference(image)
 
-            net_output = network.recurrent_inference(hidden_state, action)
+    p_value, p_policy = [], []
+    p_value.append(value)
+    p_policy.append(policy)
 
-            predictions.append((1.0 / len(actions), net_output.value, net_output.reward, net_output.policy_logits))
-            hidden_state = net_output.hidden_state
+    # Recurrent steps, from action and previous hidden state.
+    for action in actions:
 
-        for prediction, target_value, target_reward, target_policy in zip(predictions, target_values, target_rewards, target_policies):
-            target_value, target_reward, target_policy = target_value.to(device), target_reward.to(device), target_policy.to(device)
+        value, policy, hidden_state = network.recurrent_inference(hidden_state, action)
 
-            _ , value, reward, policy_logits = prediction
-            
-            p_loss += torch.mean(torch.sum(-target_policy * torch.log(policy_logits), dim=1))
-            v_loss += torch.mean(torch.sum((target_value - value) ** 2, dim=1))
-  
+        p_value.append(value)
+        p_policy.append(policy)
+
+    p_value = torch.stack(p_value).squeeze()
+    p_policy = torch.stack(p_policy)
+
+    # p_value = p_value.view(config.batch_size, config.num_unroll_steps+1)
+    # p_policy = p_policy.view(config.batch_size, config.num_unroll_steps+1, config.action_space_size)
+
+    target_policies = target_policies.transpose(0, 1)
+    p_policy = p_policy.transpose(0, 1)
+    target_values = target_values.transpose(0, 1)
+    p_value = p_value.transpose(0, 1)
+    p_loss += torch.mean(torch.sum(-target_policies * torch.log(p_policy), dim=2))
+    v_loss += torch.mean(torch.sum((target_values - p_value) ** 2, dim=1))
   
     total_loss = (p_loss + v_loss)
     total_loss.backward()
     optimizer.step()
-    print('step %d: p_loss %f v_loss %f' % (network.steps%config.checkpoint_interval, p_loss, v_loss))
+    print('step {}: p_loss {:.4f} v_loss {:.4f}'.format(network.steps, p_loss, v_loss))
     network.steps += 1
 
 
@@ -281,7 +296,7 @@ def softmax_sample(distribution, temperature: float):
     elif temperature == 1:
         visits_sum = sum(visits)
         visits_prob = [i/visits_sum for i in visits]
-        return random.choice(actions, 1, visits_prob).item()
+        return np.random.choice(actions, p=visits_prob)
     else:
         raise NotImplementedError
         
@@ -290,3 +305,4 @@ if __name__ == '__main__':
 
     muzero()
 
+# %%

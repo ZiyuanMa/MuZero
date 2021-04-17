@@ -31,9 +31,8 @@ known_bounds = (-1, 1)
 # Training
 training_steps = 1500
 checkpoint_interval = 100
-window_size = 512
-batch_size = 1024
-mini_batch_size = 256
+window_size = 2048
+batch_size = 128
 num_unroll_steps = 4
 td_steps = 60
 
@@ -46,4 +45,6 @@ lr_decay_rate = 0.1
 lr_decay_steps = 400e3
 
 episodes=512
-state_shape = (2, 8, 8)
+state_history_steps = 3
+state_shape = (state_history_steps*4+4, 8, 8)
+num_channels = 128
