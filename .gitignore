@@ -3,3 +3,4 @@ __pycache__
 venv
 model0.pth
 .DS_Store
+models/*

@@ -2,7 +2,6 @@
 """ useful classes for Muzero """
 from enum import Enum
 import time
-import threading
 from reversi import *
 import config
 import random
@@ -52,7 +51,7 @@ class ReplayBuffer:
         self.batch_size = config.batch_size
         self.buffer_size = 0
         self.buffer = []
-        self.lock = threading.Lock()
+        self.counter = 0
 
     def save_game(self, game):
         # with self.lock:
@@ -61,7 +60,7 @@ class ReplayBuffer:
             self.buffer_size -= 1
         self.buffer.append(game)
         self.buffer_size += 1
-        print(self.buffer_size)
+        self.counter += len(game.action_history)
 
     def ready(self):
         if self.buffer_size < self.batch_size:
@@ -70,11 +69,12 @@ class ReplayBuffer:
             return True
 
     
-    def sample_batch(self, num_unroll_steps: int = config.num_unroll_steps, td_steps: int = config.td_steps):
+    def sample_batch(self, num_unroll_steps: int = config.num_unroll_steps):
         # while self.buffer_size < self.batch_size:
         #     print('waiting')
         #     time.sleep(1)
-        games = [self.sample_game() for _ in range(self.batch_size)]
+        game_idxes = random.sample(range(self.buffer_size), self.batch_size)
+        games = [self.buffer[idx] for idx in game_idxes]
         game_pos = [(g, self.sample_position(g)) for g in games]
         # batch = [(g.make_image(i), g.history[i:i + num_unroll_steps],
         #         g.make_target(i, num_unroll_steps, td_steps))
@@ -86,8 +86,8 @@ class ReplayBuffer:
         target_policies = []
         for g, i in game_pos:
             init_state.append(g.make_image(i))
-            actions.append(np.array(g.action_history[i:i + num_unroll_steps]))
-            target_value, target_policy = g.make_target(i, num_unroll_steps, td_steps)
+            actions.append(np.array([ g.encode() for g in g.action_history[i:i + num_unroll_steps]]))
+            target_value, target_policy = g.make_target(i, num_unroll_steps)
             target_values.append(target_value)
             target_policies.append(np.array(target_policy))
         
@@ -98,15 +98,15 @@ class ReplayBuffer:
 
         return init_state, actions, target_values, target_policies
 
-    def sample_game(self):
-        # Sample game from buffer either uniformly or according to some priority.
-        idx = random.randint(0, self.buffer_size-1)
-        return self.buffer[idx]
-
     def sample_position(self, game) -> int:
         
         # Sample position from game either uniformly or according to some priority.
         return random.randint(0, len(game.action_history)-config.num_unroll_steps)
+    
+    def count(self):
+        temp = self.counter
+        self.counter = 0
+        return temp
 
 
 MAXIMUM_FLOAT_VALUE = float('inf')

@@ -19,14 +19,21 @@ class Player(Enum):
 @dataclass
 class Action:
     index: int
-    player: Player = None
+    player: Player
     position: Optional[Tuple[int, int]] = field(init=False)
 
     def __post_init__(self):
+        assert self.index >= 0 and self.index <= 64
         if self.index < 64:
             self.position = divmod(self.index, 8)
         else:
             self.position = None
+    
+    def encode(self):
+        encoded_action = np.zeros((2, 8, 8), dtype=np.bool)
+        layer = 0 if self.player is Player.WHITE else 1
+        encoded_action[layer, self.position] = 1
+        return encoded_action
 
 
 class Environment:
@@ -42,29 +49,33 @@ class Environment:
         self.possible_pos = {(2, 2), (2, 3), (2, 4), (2, 5), (3, 2), (3, 5),
                             (4, 2), (4, 5), (5, 2), (5, 3), (5, 4), (5,5)}
 
-        self.legal_positions = {(1, 2), (2, 1), (5, 4), (4, 5)}
+        self.legal_actions = [Action(2*8+3, Player.BLACK), Action(3*8+2, Player.BLACK), Action(5*8+4, Player.BLACK), Action(4*8+5, Player.BLACK)]
 
         self.player = Player.BLACK
 
+        self.steps = 0
+
         self.done = False
 
-    def reset(self):
+    # def reset(self):
 
-        self.board = np.zeros((8, 8), dtype=np.int8)
-        self.board[3, 3] = 1
-        self.board[4, 4] = 1
-        self.board[3, 4] = -1
-        self.board[4, 3] = -1
+    #     self.board = np.zeros((8, 8), dtype=np.int8)
+    #     self.board[3, 3] = 1
+    #     self.board[4, 4] = 1
+    #     self.board[3, 4] = -1
+    #     self.board[4, 3] = -1
         
-        # position around the chess pieces
-        self.possible_pos = {(2, 2), (2, 3), (2, 4), (2, 5), (3, 2), (3, 5),
-                            (4, 2), (4, 5), (5, 2), (5, 3), (5, 4), (5,5)}
+    #     # position around the chess pieces
+    #     self.possible_pos = {(2, 2), (2, 3), (2, 4), (2, 5), (3, 2), (3, 5),
+    #                         (4, 2), (4, 5), (5, 2), (5, 3), (5, 4), (5, 5)}
 
-        self.legal_positions = {(2, 3), (3, 2), (5, 4), (4, 5)}
+    #     # self.legal_actions = {(2, 3), (3, 2), (5, 4), (4, 5)}
 
-        self.player = Player.BLACK
+    #     self.legal_actions = [Action(2*8+3, Player.BLACK), Action(3*8+2, Player.BLACK), Action(5*8+4, Player.BLACK), Action(4*8+5, Player.BLACK)]
 
-        self.done = False
+    #     self.player = Player.BLACK
+
+    #     self.done = False
 
 
     def check_direction(self, position, next_player: Player, direction):
@@ -104,20 +115,33 @@ class Environment:
                 legal_pos.append(position)
 
         return legal_pos
+
+    def update_legal_actions(self):
+        self.legal_actions = []
+        for position in self.possible_pos:
+            if self.check_position(position):
+                self.legal_actions.append(Action(position[0]*8+position[1], self.player))
+        
+        if not self.legal_actions:
+            self.legal_actions.append(Action(64, self.player))
+
+
     
     def step(self, action: Action, player: Player = None):
         if player: assert player is self.player
 
+        self.steps += 1
+
         if action.index == 64:
-            assert not self.legal_positions
+
             self.player = Player.WHITE if self.player is Player.BLACK else Player.BLACK
-            self.legal_positions = self.get_legal_actions()
-            assert self.legal_positions
+            self.update_legal_actions()
             return self.observe(), 0, False
 
         position = np.array(action.position)
 
-        assert action.position in self.possible_pos
+        assert action.position in self.possible_pos, '{} out of {} at {}'.format(action.position, self.possible_pos, self.steps)
+        assert action in self.legal_actions, '{} out of {}'.format(action, self.legal_actions)
 
         opponent_player = Player.WHITE if self.player is Player.BLACK else Player.BLACK
 
@@ -143,27 +167,16 @@ class Environment:
         
             self.board[action.position] = self.player.value
 
-            self.possible_pos.remove(action.position)
+            if self.steps == 60:
+                self.done = True
+                return self.observe(), self.check_win(), True
 
-            for direction in DIRECTIONS:
-                around_position = position + direction
-                if np.all(around_position>=0) and np.all(around_position<=7) and self.board[tuple(around_position)] == 0 and tuple(around_position) not in self.possible_pos:
-                    self.possible_pos.add(tuple(around_position))
+            self.update_possible_position(action.position)
 
             self.player = Player.WHITE if self.player is Player.BLACK else Player.BLACK
 
-            self.legal_positions = self.get_legal_actions()
-            if not self.legal_positions:
-                self.player = Player.WHITE if self.player is Player.BLACK else Player.BLACK
-                self.legal_positions = self.get_legal_actions()
-                if not self.legal_positions:
-                    self.done = True
-                    return self.observe(), 1, True
-                else:
-                    self.player = Player.WHITE if self.player is Player.BLACK else Player.BLACK
-                    self.legal_positions = self.get_legal_actions()
-            
-            self.done = False
+            self.update_legal_actions()
+
             return self.observe(), 0, False
     
     def observe(self):
@@ -171,6 +184,26 @@ class Environment:
         obs = np.stack((self.board==Player.WHITE.value, self.board==Player.BLACK.value), axis=0).astype(np.bool)
 
         return obs
+    
+    def update_possible_position(self, position):
+        self.possible_pos.remove(position)
+
+        for direction in DIRECTIONS:
+            around_position = position + direction
+            if np.all(around_position>=0) and np.all(around_position<=7) and self.board[tuple(around_position)] == 0:
+                self.possible_pos.add(tuple(around_position))
+
+    
+    def check_win(self):
+        white_score = np.sum(self.board==1)
+        black_score = np.sum(self.board==-1)
+        if white_score == black_score:
+            return 0
+        elif white_score > black_score:
+            return self.player.value
+        else:
+            return -self.player.value
+
 
     def print_board(self):
         char_board = np.vectorize(index_to_char)(self.board)
@@ -202,7 +235,7 @@ class Node:
 
     def __init__(self, prior: float, player: Player):
         self.visit_count = 0
-        self.to_play = player
+        self.player = player
         self.prior = prior
         self.value_sum = 0
         self.children = {}
@@ -224,7 +257,7 @@ class Game:
     def __init__(self):
         self.environment = Environment()  # Game specific environment.
         self.state_history = [self.environment.observe()]
-        self.player_history = [Player.BLACK]
+        # self.player_history = [Player.BLACK]
         self.action_history = []
         self.rewards = []
         self.child_visits = []
@@ -235,30 +268,26 @@ class Game:
     def terminal(self) -> bool:
         return self.environment.done
 
-    def legal_actions(self) -> List[int]:
-        positions = self.environment.get_legal_actions()
-        if positions:
-            actions = [ x*8+y for x, y in positions ]
-        else:
-            actions = [ 64 ]
+    def legal_actions(self) -> List[Action]:
 
-        return actions
+        return self.environment.legal_actions
 
     def apply(self, action: Action):
-        if self.environment.player is not None:
-            self.player_history.append(self.environment.player)
-
-        state, reward, done = self.environment.step(action)
+        # if self.environment.player is not None:
+        #     self.player_history.append(self.environment.player)
+        # print(action)
+        state, reward, _ = self.environment.step(action)
         
         self.rewards.append(reward)
         self.state_history.append(state)
 
-        encoded_action = np.zeros((2, 8, 8), dtype=np.bool)
-        if action is Player.WHITE:
-            encoded_action[0, action.position] = 1
-        else:
-            encoded_action[1, action.position] = 1
-        self.action_history.append(encoded_action)
+        # encoded_action = np.zeros((2, 8, 8), dtype=np.bool)
+        # if action is Player.WHITE:
+        #     encoded_action[0, action.position] = 1
+        # else:
+        #     encoded_action[1, action.position] = 1
+
+        self.action_history.append(action)
 
     def store_search_statistics(self, root: Node):
         sum_visits = sum(child.visit_count for child in root.children.values())
@@ -273,26 +302,16 @@ class Game:
         """ convert state to Representation network input """
         image = np.zeros(config.state_shape, dtype=np.bool)
 
-        shift = 0
-        if state_index < config.state_history_steps:
-            shift =  config.state_history_steps-state_index
-            for i in range(shift):
-                image[i*4:i*4+2] = self.state_history[0]
-        
-        for i in range(shift, config.state_history_steps):
-            image[i*4:i*4+2] = self.state_history[i-shift]
+        for i in range(min(state_index, config.state_history_len)):
+            image[(config.state_history_len-1-i)*2:(config.state_history_len-i)*2] = self.state_history[state_index-i]
 
-            image[i*4+2:(i+1)*4] = self.action_history[i-shift]
-        
-        image[-4:-2] = self.state_history[state_index]
-        if self.player_history[state_index] is Player.WHITE:
-            image[-2] = 1
-        else:
+        if state_index % 2 == 0:
+            # black tern
             image[-1] = 1
 
         return image.astype(np.float32)
 
-    def make_target(self, state_index: int, num_unroll_steps: int, td_steps: int):
+    def make_target(self, state_index: int, num_unroll_steps: int):
         # The value target is the discounted root value of the search tree N steps
         # into the future, plus the discounted sum of all rewards until then.
         # targets = []
@@ -310,7 +329,7 @@ class Game:
             #     value += reward * self.discount**i
 
             if current_index < len(self.root_values):
-                value = self.rewards[-1] if self.player_history[current_index] is self.player_history[-1] else -self.rewards[-1]
+                value = self.rewards[-1] if self.action_history[current_index].player is self.action_history[-1].player else -self.rewards[-1]
                 # targets.append((value, self.child_visits[current_index]))
                 target_value.append(value)
                 target_policy.append(self.child_visits[current_index])

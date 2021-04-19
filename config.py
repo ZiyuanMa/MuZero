@@ -11,7 +11,7 @@ action_space_size = 65
 
 visit_softmax_temperature_fn = visit_softmax_temperature
 max_moves = 60
-num_simulations = 100
+num_simulations = 60
 discount = 1.0
 
 # Root prior exploration noise.
@@ -29,12 +29,13 @@ pb_c_init = 1.25
 known_bounds = (-1, 1)
 
 # Training
-training_steps = 1500
-checkpoint_interval = 100
-window_size = 2048
-batch_size = 128
-num_unroll_steps = 4
+training_steps = 100000
+checkpoint_interval = 1
+window_size = 512
+batch_size = 16
+num_unroll_steps = 3
 td_steps = 60
+training_interval = 0.5
 
 weight_decay = 1e-4
 momentum = 0.9
@@ -44,7 +45,6 @@ lr_init = 0.01
 lr_decay_rate = 0.1
 lr_decay_steps = 400e3
 
-episodes=512
-state_history_steps = 3
-state_shape = (state_history_steps*4+4, 8, 8)
+state_history_len = 4
+state_shape = (state_history_len*2+1, 8, 8)
 num_channels = 128

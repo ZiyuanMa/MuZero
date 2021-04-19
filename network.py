@@ -12,22 +12,22 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 filter_num = 32
 
-class Dataset(Dataset):
+# class Dataset(Dataset):
 
-    def __init__(self, data):
-        self.images = [torch.from_numpy(image) for image, _, _ in data]
-        self.actions = [[torch.from_numpy(action.encode()) for action in action_list] for _, action_list, _ in data]
-        self.target_values = [[torch.tensor([value], dtype=torch.float) for value, _, _ in target_list]for _, _, target_list in data]
-        self.target_rewards = [[torch.tensor([reward], dtype=torch.float) for _, reward, _ in target_list]for _, _, target_list in data]
-        self.target_policies = [[torch.tensor(policy, dtype=torch.float) for _, _, policy in target_list]for _, _, target_list in data]
-        self.len = len(data)
+#     def __init__(self, data):
+#         self.images = [torch.from_numpy(image) for image, _, _ in data]
+#         self.actions = [[torch.from_numpy(action.encode()) for action in action_list] for _, action_list, _ in data]
+#         self.target_values = [[torch.tensor([value], dtype=torch.float) for value, _, _ in target_list]for _, _, target_list in data]
+#         self.target_rewards = [[torch.tensor([reward], dtype=torch.float) for _, reward, _ in target_list]for _, _, target_list in data]
+#         self.target_policies = [[torch.tensor(policy, dtype=torch.float) for _, _, policy in target_list]for _, _, target_list in data]
+#         self.len = len(data)
 
-    def __getitem__(self, index):
+#     def __getitem__(self, index):
 
-        return self.images[index], self.actions[index], self.target_values[index], self.target_rewards[index], self.target_policies[index]
+#         return self.images[index], self.actions[index], self.target_values[index], self.target_rewards[index], self.target_policies[index]
 
-    def __len__(self):
-        return self.len
+#     def __len__(self):
+#         return self.len
 
 
 
@@ -36,15 +36,15 @@ class ResidualBlock(nn.Module):
     def __init__(self, filters):
         super().__init__()
         self.block = nn.Sequential(
-            nn.Conv2d(filters, filters, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(filters),
-            nn.LeakyReLU(),
-            nn.Conv2d(filters, filters, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(filters)
+            nn.Conv2d(filters, filters, 3, 1, 1),
+            # nn.BatchNorm2d(filters),
+            nn.ReLU(),
+            nn.Conv2d(filters, filters, 3, 1, 1),
+            # nn.BatchNorm2d(filters)
         )
 
     def forward(self, x):
-        return F.leaky_relu(x + (self.block(x)))
+        return F.relu(x + self.block(x))
 
 class Representation(nn.Module):
     # from board to hidden state
@@ -52,32 +52,20 @@ class Representation(nn.Module):
         super().__init__()
 
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=config.state_shape[0],
-                            out_channels=num_channels,
-                            kernel_size=3,
-                            stride=1,
-                            padding=1,
-                            bias=False),
-            nn.BatchNorm2d(num_channels),
-            nn.LeakyReLU()
+            nn.Conv2d(config.state_shape[0], num_channels, 3, 1, 1),
+            # nn.BatchNorm2d(num_channels),
+            nn.ReLU()
         )
 
         self.conv2 = nn.Sequential(
             ResidualBlock(num_channels),
             ResidualBlock(num_channels),
             ResidualBlock(num_channels),
-            ResidualBlock(num_channels),
         )
 
         self.conv3 = nn.Sequential(
-            nn.Conv2d(in_channels=num_channels,
-                            out_channels=2,
-                            kernel_size=3,
-                            stride=1,
-                            padding=1,
-                            bias=False),
-            nn.BatchNorm2d(2),
-            nn.LeakyReLU()
+            nn.Conv2d(num_channels, 8, 3, 1, 1),
+            nn.ReLU(),
         )
 
     def forward(self, x):
@@ -97,21 +85,26 @@ class Prediction(nn.Module):
         self.flatten = nn.Flatten()
 
         self.policy_head = nn.Sequential(
-
+            nn.Conv2d(8, 2, 1, 1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(self.board_size*2, self.board_size*2),
+            nn.ReLU(),
             nn.Linear(self.board_size*2, config.action_space_size),
             nn.Softmax(dim=1)
         )
 
         self.value_head = nn.Sequential(
 
-            nn.Linear(self.board_size*2, self.board_size),
-            nn.LeakyReLU(),
-            nn.Linear(self.board_size, 1),
+            nn.Conv2d(8, 2, 1, 1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(self.board_size*2, 1),
             nn.Tanh()
         )
 
     def forward(self, x):
-        x = self.flatten(x)
+
         policy = self.policy_head(x)
         value = self.value_head(x)
 
@@ -123,13 +116,15 @@ class Dynamics(nn.Module):
         super().__init__()
 
         self.conv = nn.Sequential(
-            nn.Conv2d(4, num_channels, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(),
+            nn.Conv2d(10, num_channels, 3, 1, 1, bias=False),
+            # nn.BatchNorm2d(128),
+            nn.ReLU(),
             ResidualBlock(num_channels),
-            nn.Conv2d(num_channels, 2, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(2),
-            nn.LeakyReLU(),
+            ResidualBlock(num_channels),
+            ResidualBlock(num_channels),
+            nn.Conv2d(num_channels, 8, 3, 1, 1, bias=False),
+            # nn.BatchNorm2d(2),
+            nn.ReLU(),
 
         )
 
