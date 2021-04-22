@@ -1,11 +1,13 @@
 from typing import List
 import math
+import multiprocessing as mp
 import torch
 import numpy as np
 from reversi import Environment, Game, Node, Action, Player
 from network import Network
 import config
 
+torch.set_num_threads(1)
 
 class Controller:
     def __init__(self, player: Player, network: Network):
@@ -13,7 +15,7 @@ class Controller:
         self.network = network
         self.state_history = [np.zeros((2, 8, 8), dtype=np.bool) for _ in range(config.state_history_len)]
 
-    def step(self, state, player, legal_actions):
+    def step(self, state, player: Player, legal_actions):
         self.state_history.pop(0)
         self.state_history.append(state)
 
@@ -30,7 +32,7 @@ class Controller:
                 net_output = self.network.initial_inference(torch.from_numpy(obs))
             
             # print(legal_actions)
-            legal_actions = [a.position[0]*8+a.position[1] for a in legal_actions]
+            legal_actions = [a.index for a in legal_actions]
             # print(legal_actions)
             expand_node(root, legal_actions, net_output)
 
@@ -40,52 +42,74 @@ class Controller:
             action = select_action(root, self.network)
             return Action(action, player)
 
-def test(base, target):
-    wins = 0
-    for _ in range(50):
-        env = Environment()
-        black_c = Controller(Player.BLACK, base)
-        white_c = Controller(Player.WHITE, target)
-        while not env.done:
-            obs = env.observe()
-            # print(env.player)
-            a_b = black_c.step(obs, env.player, env.legal_actions)
-            a_w = white_c.step(obs, env.player, env.legal_actions)
+def test1(args):
+
+    base, target = args
+    env = Environment()
+    black_c = Controller(Player.BLACK, base)
+    white_c = Controller(Player.WHITE, target)
+    while not env.done:
+        obs = env.observe()
+        # print(env.player)
+        a_b = black_c.step(obs, env.player, env.legal_actions)
+        a_w = white_c.step(obs, env.player, env.legal_actions)
+        # print(a_b)
+        # print(a_w)
+        if a_b:
             # print(a_b)
+            env.step(a_b)
+        else:
             # print(a_w)
-            if a_b:
-                # print(a_b)
-                env.step(a_b)
-            else:
-                # print(a_w)
-                env.step(a_w)
+            env.step(a_w)
+        
+        # print(env.steps)
 
-        white_score = np.sum(env.board==1)
-        black_score = np.sum(env.board==-1)
-        if white_score > black_score:
-            wins += 1
+    white_score = np.sum(env.board==1)
+    black_score = np.sum(env.board==-1)
+    print(white_score)
+    if white_score > black_score:
+        return 1
+    else:
+        return 0
+
+def test2(args):
+    base, target = args
+    env = Environment()
+    black_c = Controller(Player.BLACK, target)
+    white_c = Controller(Player.WHITE, base)
+    while not env.done:
+        obs = env.observe()
+        # print(env.player)
+        a_b = black_c.step(obs, env.player, env.legal_actions)
+        a_w = white_c.step(obs, env.player, env.legal_actions)
+        # print(a_b)
+        # print(a_w)
+        if a_b:
+            # print(a_b)
+            env.step(a_b)
+        else:
+            # print(a_w)
+            env.step(a_w)
+        
+        
+
+    white_score = np.sum(env.board==1)
+    black_score = np.sum(env.board==-1)
+    print(black_score)
+    if white_score < black_score:
+        return 1
+    else:
+        return 0
 
 
-    
-    for _ in range(50):
-        env = Environment()
-        black_c = Controller(Player.BLACK, target)
-        white_c = Controller(Player.WHITE, base)
-        while not env.done:
-            obs = env.observe()
-            black_action = black_c.step(obs, env.player, env.legal_actions)
-            white_action = white_c.step(obs, env.player, env.legal_actions)
-            if black_action:
-                env.step(black_action)
-            else:
-                env.step(white_action)
-                
-        white_score = np.sum(env.board==1)
-        black_score = np.sum(env.board==-1)
-        if white_score < black_score:
-            wins += 1
-    
-    print(wins)
+def test(base, target):
+    test1((base, target))
+    pool = mp.Pool(mp.cpu_count())
+    params = [(base, target) for _ in range(10)]
+    ret1 = pool.map(test1, params)
+    ret2 = pool.map(test2, params)
+    print(sum(ret1)+sum(ret2))
+
 
 
             
@@ -124,25 +148,22 @@ def run_mcts(root: Node, network: Network):
 
         # choose node based on score if it already exists in tree
         while node.expanded():
-            action, node = select_child(node, min_max_stats)
-            history.append(action)
+            action_idx, node = select_child(node, min_max_stats)
+            history.append(Action(action_idx, node.player))
             search_path.append(node)
 
         # go until a unexpanded node, expand by using recurrent inference then backup
         parent = search_path[-2]
         last_action = history[-1]
 
-        encoded_action = np.zeros((2, 8, 8), dtype=np.float32)
-        player_idx = 0 if last_action is Player.WHITE else 1
-        encoded_action[player_idx, last_action.position] = 1
+        encoded_action = last_action.encode()
         
         with torch.no_grad():
             network_output = network.recurrent_inference(parent.hidden_state, torch.from_numpy(encoded_action))
 
         expand_node(node, [i for i in range(config.action_space_size)], network_output)
 
-        backpropagate(search_path, network_output[0], history[-1].player,
-                    config.discount, min_max_stats)
+        backpropagate(search_path, network_output[0], history[-1].player, config.discount, min_max_stats)
 
 
 def select_action(node: Node, network: Network):
@@ -150,7 +171,7 @@ def select_action(node: Node, network: Network):
         (child.visit_count, action) for action, child in node.children.items()
     ]
 
-    t = 0.0  # Play according to the max.
+    t = 0.25  # Play according to the max.
 
     action = softmax_sample(visit_counts, t)
     return action
@@ -161,7 +182,7 @@ def select_child(node: Node, min_max_stats: MinMaxStats):
     _, action_idx, child = max(
         (ucb_score(node, child, min_max_stats), action,
         child) for action, child in node.children.items())
-    return Action(action_idx), child
+    return action_idx, child
 
 
 # The score for a node is based on its value, plus an exploration bonus based on
@@ -188,7 +209,7 @@ def expand_node(node: Node, actions: List[int], network_output):
     # print(actions)
     policy = {a: network_output[1][0, a].item() for a in actions}
     policy_sum = sum(policy.values())
-    next_player = Player.WHITE if node.to_play is Player.BLACK else Player.BLACK
+    next_player = Player.WHITE if node.player is Player.BLACK else Player.BLACK
     for action, p in policy.items():
         node.children[action] = Node(p / policy_sum, next_player)
 
@@ -197,7 +218,7 @@ def expand_node(node: Node, actions: List[int], network_output):
 # tree of the root.
 def backpropagate(search_path: List[Node], value: float, to_play: int, discount: float, min_max_stats: MinMaxStats):
     for node in search_path:
-        node.value_sum += value if node.to_play == to_play else -value
+        node.value_sum += value if node.player == to_play else -value
         node.visit_count += 1
         min_max_stats.update(node.value())
 
@@ -210,6 +231,11 @@ def softmax_sample(distribution, temperature: float):
     if temperature == 0:
         return actions[visits.index(max(visits))]
     elif temperature == 1:
+        visits_sum = sum(visits)
+        visits_prob = [i/visits_sum for i in visits]
+        return np.random.choice(actions, p=visits_prob)
+    elif temperature > 0 and temperature < 1:
+        visits = [visit**(1/temperature) for visit in visits]
         visits_sum = sum(visits)
         visits_prob = [i/visits_sum for i in visits]
         return np.random.choice(actions, p=visits_prob)

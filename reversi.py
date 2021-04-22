@@ -128,7 +128,7 @@ class Environment:
 
     
     def step(self, action: Action, player: Player = None):
-        if player: assert player is self.player
+        assert action.player is self.player
 
         self.steps += 1
 

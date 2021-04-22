@@ -31,8 +31,8 @@ known_bounds = (-1, 1)
 # Training
 training_steps = 100000
 checkpoint_interval = 1
+batch_size = 512
 window_size = 512
-batch_size = 16
 num_unroll_steps = 3
 td_steps = 60
 training_interval = 0.5

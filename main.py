@@ -203,6 +203,8 @@ def train_network(network, optimizer, storage:SharedStorage, replay_buffer: Repl
     network.train()
     network.to(device)
 
+    optimizer = optim.SGD(network.parameters(), lr=0.001, weight_decay=config.lr_decay_rate, momentum=config.momentum)
+
     print('start training')
     for i in range(1, config.training_steps+1):
 
